@@ -1,0 +1,101 @@
+#cloud-config
+# CIS Server Level 1 hardened Ubuntu — unattended autoinstall (template).
+# Rendered per target by render.sh into build/<target>/cidata/user-data.
+#
+# Ubuntu Server uses Subiquity autoinstall, not kickstart. Two delivery facts
+# that differ from the EL targets:
+#   1. The config is read from a FAT volume labeled CIDATA (user-data +
+#      meta-data), NOT OEMDRV.
+#   2. `autoinstall` MUST be on the kernel command line or Subiquity stops and
+#      waits for a human to confirm the destructive install. CIDATA alone does
+#      not skip that prompt, so the installer ISO has to be repacked with the
+#      boot argument added (see README).
+#
+# The password below is an SHA-512 crypt hash, not plaintext — autoinstall's
+# identity.password requires a hash. render.sh derives it from local-creds.env.
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: UTC
+
+  identity:
+    hostname: @HOSTNAME@
+    username: builder
+    password: "@BUILDER_PW_HASH@"
+
+  ssh:
+    install-server: true
+    allow-pw: true
+
+  # CIS 1.1.x partition layout, expressed in curtin storage config — the
+  # autoinstall equivalent of the kickstart logvol block. Separate filesystems
+  # with restrictive mount options; these must be set at install time.
+  storage:
+    config:
+      - {id: disk0, type: disk, path: /dev/sda, ptable: gpt, wipe: superblock-recursive, preserve: false, grub_device: false}
+      - {id: p_esp, type: partition, device: disk0, size: 512M, flag: boot, grub_device: true, preserve: false}
+      - {id: fs_esp, type: format, volume: p_esp, fstype: fat32, preserve: false}
+      - {id: p_boot, type: partition, device: disk0, size: 1G, preserve: false}
+      - {id: fs_boot, type: format, volume: p_boot, fstype: ext4, preserve: false}
+      - {id: p_pv, type: partition, device: disk0, size: -1, preserve: false}
+      - {id: vg_sys, type: lvm_volgroup, name: vg_sys, devices: [p_pv], preserve: false}
+
+      - {id: lv_root, type: lvm_partition, volgroup: vg_sys, name: root, size: 8G, preserve: false}
+      - {id: fs_root, type: format, volume: lv_root, fstype: ext4, preserve: false}
+      - {id: lv_home, type: lvm_partition, volgroup: vg_sys, name: home, size: 1G, preserve: false}
+      - {id: fs_home, type: format, volume: lv_home, fstype: ext4, preserve: false}
+      - {id: lv_tmp, type: lvm_partition, volgroup: vg_sys, name: tmp, size: 1G, preserve: false}
+      - {id: fs_tmp, type: format, volume: lv_tmp, fstype: ext4, preserve: false}
+      - {id: lv_var, type: lvm_partition, volgroup: vg_sys, name: var, size: 4G, preserve: false}
+      - {id: fs_var, type: format, volume: lv_var, fstype: ext4, preserve: false}
+      - {id: lv_vartmp, type: lvm_partition, volgroup: vg_sys, name: vartmp, size: 1G, preserve: false}
+      - {id: fs_vartmp, type: format, volume: lv_vartmp, fstype: ext4, preserve: false}
+      - {id: lv_varlog, type: lvm_partition, volgroup: vg_sys, name: varlog, size: 2G, preserve: false}
+      - {id: fs_varlog, type: format, volume: lv_varlog, fstype: ext4, preserve: false}
+      - {id: lv_varlogaudit, type: lvm_partition, volgroup: vg_sys, name: varlogaudit, size: 1G, preserve: false}
+      - {id: fs_varlogaudit, type: format, volume: lv_varlogaudit, fstype: ext4, preserve: false}
+      - {id: lv_swap, type: lvm_partition, volgroup: vg_sys, name: swap, size: 2G, preserve: false}
+      - {id: fs_swap, type: format, volume: lv_swap, fstype: swap, preserve: false}
+
+      # Mounts are ordered parent-first; options mirror the EL targets exactly.
+      - {id: m_root, type: mount, device: fs_root, path: /}
+      - {id: m_boot, type: mount, device: fs_boot, path: /boot}
+      - {id: m_esp, type: mount, device: fs_esp, path: /boot/efi}
+      - {id: m_home, type: mount, device: fs_home, path: /home, options: "nodev,nosuid"}
+      - {id: m_tmp, type: mount, device: fs_tmp, path: /tmp, options: "nodev,nosuid,noexec"}
+      - {id: m_var, type: mount, device: fs_var, path: /var, options: "nodev,nosuid"}
+      - {id: m_vartmp, type: mount, device: fs_vartmp, path: /var/tmp, options: "nodev,nosuid,noexec"}
+      - {id: m_varlog, type: mount, device: fs_varlog, path: /var/log, options: "nodev,nosuid,noexec"}
+      - {id: m_varlogaudit, type: mount, device: fs_varlogaudit, path: /var/log/audit, options: "nodev,nosuid,noexec"}
+      - {id: m_swap, type: mount, device: fs_swap, path: none}
+
+  # ssg-debderived carries the Ubuntu SCAP datastreams; open-vm-tools is the
+  # MCP control channel, matching the EL targets.
+  packages:
+    - openscap-scanner
+    - ssg-debderived
+    - open-vm-tools
+    - auditd
+    - aide
+    - chrony
+
+  # CIS 1.3.1 / 4.1.1.x: auditing active from first boot. FIPS (fips=1) is
+  # appended by render.sh when the target opts in.
+  kernel:
+    package: linux-generic
+
+  late-commands:
+    # Everything runs inside the installed system via `curtin in-target`.
+    - curtin in-target -- sed -i 's/^\(GRUB_CMDLINE_LINUX=\).*/\1"audit=1 audit_backlog_limit=8192@FIPS_ARG@"/' /etc/default/grub
+    - curtin in-target -- update-grub
+    - curtin in-target -- systemctl enable auditd chrony open-vm-tools
+    # CIS remediation — oscap exits 2 when it fixed failing rules, which is
+    # success here (same guard as the EL targets).
+    - curtin in-target -- sh -c "oscap xccdf eval --remediate --profile @CIS_PROFILE@ --report /root/ks-remediation-report.html /usr/share/xml/scap/ssg/content/@SSG_DS@ || [ $? -eq 2 ]"
+    # Site policy + residual fixes, applied after remediation so they are final.
+    - curtin in-target -- sh -c "install -d -m 0755 /etc/ssh/sshd_config.d && printf 'AllowGroups sudo\n' > /etc/ssh/sshd_config.d/49-cis-access.conf && chmod 600 /etc/ssh/sshd_config.d/49-cis-access.conf"
+    - curtin in-target -- systemctl mask rsyslog.service systemd-journal-remote.socket bluetooth.service
+
+  shutdown: poweroff

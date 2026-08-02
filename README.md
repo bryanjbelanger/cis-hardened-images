@@ -7,10 +7,35 @@ virtualbox server's tooling).
 
 ## Supported targets
 
-One kickstart template, six targets in `targets/*.env` — `rocky9`, `rocky10`,
-`alma9`, `alma10`, `cs9`, `cs10`. Each carries its ISO/checksum URLs, repo
-URLs, SSG datastream name, and EL major. Render with `./render.sh <target>`
-(or `all`).
+Eight targets in `targets/*.env`, two provisioner families:
+
+| Provisioner | Targets | Installer | Delivery |
+|---|---|---|---|
+| `kickstart` | `rocky9` `rocky10` `alma9` `alma10` `cs9` `cs10` | Anaconda | ISO labeled **OEMDRV** |
+| `autoinstall` | `ubuntu2404` `ubuntu2204` | Subiquity | ISO labeled **CIDATA** + repacked installer ISO |
+
+Each target file carries its ISO/checksum URLs, repo URLs, SSG datastream, CIS
+profile id, and provisioner. Render with `./render.sh <target|all>`, validate
+with `./validate.sh <target|all>`.
+
+Note the CIS profile id differs by family: EL uses `cis_server_l1`, Ubuntu uses
+`cis_level1_server`. It is a per-target field, not a constant.
+
+### Ubuntu: the extra install step
+
+Subiquity reads autoinstall config from a **CIDATA**-labeled volume, but that
+alone does **not** make the install unattended: `autoinstall` must also be on
+the kernel command line, or the installer stops and waits for a human to
+confirm the destructive install. So Ubuntu targets need the stock installer ISO
+repacked with that boot argument added — which requires `xorriso`
+(`brew install xorriso`) on the build host. The EL targets need no equivalent
+step, because Anaconda auto-loads OEMDRV without any boot argument.
+
+### Debian proper
+
+Deliberately not a target yet. SSG publishes a CIS **Workstation** profile for
+Debian 12 but no `cis_level1_server`, so there is no server baseline to build
+against. Ubuntu LTS is the Debian-family server target until that changes.
 
 Plain Fedora is deliberately excluded: it has no CIS SSG profile. CentOS Stream
 targets carry a caveat — CIS benchmarks track RHEL releases, and Stream runs
