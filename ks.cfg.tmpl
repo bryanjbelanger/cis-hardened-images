@@ -1,0 +1,114 @@
+# CIS Server Level 1 hardened EL — unattended kickstart (template).
+# Rendered per target by render.sh: @TOKENS@ come from targets/<name>.env and
+# local-creds.env. The rendered ks.cfg is gitignored (it contains plaintext
+# build passwords, which also land in the installed image's
+# /root/anaconda-ks.cfg — the seal step shreds those before OVA export).
+#
+# Hardening mechanism differs by EL major (HARDEN_BLOCK / POST_HARDEN tokens):
+#   EL9:  Anaconda OSCAP addon (com_redhat_oscap) remediates DURING install.
+#   EL10: the addon was REMOVED upstream (RHEL 10 removed oscap-anaconda-addon,
+#         and %addon com_redhat_oscap is no longer supported) — remediation
+#         runs in %post via `oscap xccdf eval --remediate` instead.
+#
+# Delivery: burn the rendered ks.cfg into an ISO with volume label OEMDRV
+# (vm action=make_iso volume_label=OEMDRV) — Anaconda auto-loads it, no
+# boot-argument editing needed.
+
+text
+lang en_US.UTF-8
+keyboard us
+timezone UTC --utc
+network --bootproto=dhcp --device=link --activate --hostname=@HOSTNAME@
+firstboot --disable
+selinux --enforcing
+firewall --enabled --ssh
+services --enabled=auditd,firewalld,chronyd,vmtoolsd
+
+# Install source: `cdrom` for minimal/dvd ISOs (BaseOS on the media);
+# CentOS Stream boot ISOs carry no packages, so their targets use
+# `url --url=<BaseOS os repo>` here instead.
+@INSTALL_SRC@
+
+# CIS 1.3.1 / 4.1.1.x: auditing active from the first boot onward.
+# FIPS (optional, FIPS=yes in the target env) appends fips=1 here so the kernel
+# comes up in FIPS mode and keys/initramfs are generated under it from the
+# start — retrofitting with fips-mode-setup after install is supported but
+# leaves pre-FIPS key material behind. FIPS is orthogonal to CIS: cis_server_l1
+# does not require it; the DISA STIG profiles do.
+bootloader --append="audit=1 audit_backlog_limit=8192@FIPS_ARG@"
+
+# CIS 1.1.x partition layout: separate filesystems with restrictive mount
+# options. L1 requires /tmp and /var/tmp separation; the rest is L2 but
+# harmless to exceed. ~21GB total inside a 25GB disk.
+zerombr
+clearpart --all --initlabel
+reqpart --add-boot
+part pv.01 --size=1 --grow
+volgroup vg_sys pv.01
+logvol /              --vgname=vg_sys --name=root   --size=8192
+logvol /home          --vgname=vg_sys --name=home   --size=1024 --fsoptions="nodev,nosuid"
+logvol /tmp           --vgname=vg_sys --name=tmp    --size=1024 --fsoptions="nodev,nosuid,noexec"
+logvol /var           --vgname=vg_sys --name=var    --size=4096 --fsoptions="nodev,nosuid"
+logvol /var/tmp       --vgname=vg_sys --name=vartmp --size=1024 --fsoptions="nodev,nosuid,noexec"
+logvol /var/log       --vgname=vg_sys --name=log    --size=2048 --fsoptions="nodev,nosuid,noexec"
+logvol /var/log/audit --vgname=vg_sys --name=audit  --size=1024 --fsoptions="nodev,nosuid,noexec"
+logvol swap           --vgname=vg_sys --name=swap   --size=2048
+
+# Build-phase credentials. root is the vmrun guest-ops account during the
+# build (oscap needs root); the seal step locks it and expires builder's
+# password so the shipped OVA forces a change at first login.
+rootpw --plaintext @ROOT_PW@
+user --name=builder --groups=wheel --gecos="Build/audit account" --password=@BUILDER_PW@ --plaintext
+
+@HARDEN_BLOCK@
+
+# Minimal server + the audit toolchain + VMware guest agent. Minimal ISOs
+# carry BaseOS only, so AppStream comes from the network repo below — and the
+# media's BaseOS is a SUBSET, so minimal-ISO targets also add the full network
+# BaseOS repo (EL10 minimal lacks fuse3/dbus-tools that open-vm-tools needs).
+# CS targets leave BASEOS_REPO empty: their `url` source IS network BaseOS.
+@BASEOS_REPO@
+repo --name=AppStream --baseurl=@APPSTREAM_URL@
+%packages
+@^minimal-environment
+openscap-scanner
+scap-security-guide
+open-vm-tools
+audit
+aide
+chrony
+firewalld
+%end
+
+%post --log=/root/ks-post.log
+# vmtoolsd is the MCP control channel (vmrun guest ops) — must survive boot.
+systemctl enable vmtoolsd auditd firewalld chronyd
+@POST_HARDEN@
+
+# Site-policy and residual-fail fixes, applied AFTER remediation so they are
+# final. (%post runs in a chroot: `disable`/`mask` work via symlinks, `--now`
+# does not — never add it here.)
+
+# CIS 5.1.x sshd_limit_user_access — restrict SSH to administrators. Site
+# policy: the wheel group (builder is a member, so the shipped image stays
+# reachable). Deployers add their own accounts to wheel or edit this file.
+install -d -m 0755 /etc/ssh/sshd_config.d
+printf 'AllowGroups wheel\n' > /etc/ssh/sshd_config.d/49-cis-access.conf
+chmod 600 /etc/ssh/sshd_config.d/49-cis-access.conf
+
+# CIS 4.2.1.x — journald is the log backend; rsyslog must not run alongside it.
+systemctl disable rsyslog.service 2>/dev/null || true
+systemctl mask rsyslog.service 2>/dev/null || true
+
+# CIS 4.2.1.x — this host must not accept remote journal entries.
+systemctl mask systemd-journal-remote.socket 2>/dev/null || true
+
+# CIS 2.2.x — bluetooth has no role on a server image.
+systemctl mask bluetooth.service 2>/dev/null || true
+
+# CIS 6.1.x AIDE baseline is initialized post-audit in the seal step, not
+# here, so the baseline reflects the final sealed state.
+%end
+
+# Power off when done so the host pipeline knows installation finished.
+poweroff

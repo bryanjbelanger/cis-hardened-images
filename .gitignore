@@ -1,0 +1,11 @@
+# build passwords — NEVER commit
+local-creds.env
+
+# generated: rendered kickstarts (contain plaintext build passwords),
+# ISOs, OEMDRV images, OVAs, audit reports
+build/
+
+# python venv for ksvalidator
+.venv/
+
+.DS_Store
