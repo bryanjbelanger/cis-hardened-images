@@ -31,7 +31,17 @@ Note the CIS profile id differs by family: EL uses `cis_server_l1`, Ubuntu uses
    all. The pipeline stages a prebuilt datastream extracted from the *noble*
    `ssg-debderived` deb (~1.9MB), which carries both `ssg-ubuntu2204-ds.xml`
    and `ssg-ubuntu2404-ds.xml`. No SSG source build is needed.
-3. **Hardening runs post-boot, not at install.** Subiquity installs `packages:`
+3. **Post-boot fixes needed beyond oscap remediation** (found by auditing, all
+   now part of the flow): `libpam-pwquality` must be installed or 12
+   `accounts_password_pam_*` rules silently no-op; apparmor needs BOTH the
+   `apparmor=1 security=apparmor` kernel args AND `aa-enforce /etc/apparmor.d/*`
+   (117 profiles), then a reboot; `/snap/bin` is on root's PATH via
+   `/etc/profile.d/apps-bin-path.sh` but does not exist on a minimal server, so
+   create it or `root_path_all_dirs` fails (note: editing `/etc/environment` or
+   `/etc/login.defs` does NOT fix this — the profile.d script re-adds it);
+   `/etc/cron.allow` must exist root:root 0640; `/var/log` needs root:syslog.
+
+4. **Hardening runs post-boot, not at install.** Subiquity installs `packages:`
    from the ISO only — its install-time sources are literally
    `deb [check-date=no] file:///cdrom jammy main restricted`, so any universe
    package there fails the install. `libpam-pwquality` in particular must be
@@ -140,8 +150,9 @@ Both EL majors built, booted, and audited with `oscap xccdf eval` against
 | Rocky 9 | `ssg-rl9-ds.xml` | `cis_server_l1` | 274 | **2** | 17 | 293 |
 | Rocky 10 | `ssg-rl10-ds.xml` | `cis_server_l1` | 300 | 8 | 15 | 323 |
 | Ubuntu 22.04 | `ssg-ubuntu2204-ds.xml` (staged) | `cis_level1_server` | 353 | **3** | 37 | 398 |
+| Ubuntu 24.04 | `ssg-ubuntu2404-ds.xml` (staged) | `cis_level1_server` | 360 | **2** | 39 | 408 |
 
-All 21 partition and mount-option rules pass on all three — `/tmp` and `/dev/shm`
+All 21 partition and mount-option rules pass on all four — `/tmp` and `/dev/shm`
 separation, plus `nodev`/`nosuid`/`noexec` across `/home`, `/tmp`, `/var`,
 `/var/tmp`, `/var/log`, `/var/log/audit`, `/dev/shm`.
 
