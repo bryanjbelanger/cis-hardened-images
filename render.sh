@@ -54,6 +54,17 @@ oscap xccdf eval --remediate \\
   --report /root/ks-remediation-report.html \\
   /usr/share/xml/scap/ssg/content/${SSG_DS} || [ \$? -eq 2 ]"
 
+
+  # SSG_SOURCE=staged: the distro's packaged SCAP content lacks this release's
+  # datastream (Ubuntu 24.04's ssg-debderived ships 16.04-22.04 only), so a
+  # verified copy rides along on the CIDATA volume and is installed into the
+  # image before remediation. =package (default) uses the distro package.
+  local stage_ds=""
+  if [[ ${SSG_SOURCE:-package} == staged ]]; then
+    stage_ds="    - curtin in-target -- mkdir -p /usr/share/xml/scap/ssg/content
+    - sh -c \"cp /cdrom/${SSG_DS} /target/usr/share/xml/scap/ssg/content/ || cp /media/*/${SSG_DS} /target/usr/share/xml/scap/ssg/content/\""
+  fi
+
   # Two provisioner families, same CIS intent:
   #   kickstart   → EL (Anaconda), delivered on an OEMDRV-labeled ISO
   #   autoinstall → Ubuntu (Subiquity), delivered as user-data + meta-data on a
@@ -65,14 +76,14 @@ oscap xccdf eval --remediate \\
     local pw_hash
     pw_hash=$(PW_BUILDER="$PW_BUILDER" .venv/bin/python -c \
       "from passlib.hash import sha512_crypt;import os;print(sha512_crypt.hash(os.environ['PW_BUILDER']))")
-    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg \
-    CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS \
+    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg ROOT_PW_V=$PW_ROOT_BUILD \
+    CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS STAGE_DS_V=$stage_ds \
     python3 - "$tgt" << 'PYEOF'
 import os, sys
 tmpl = open("autoinstall.tmpl").read()
 for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@BUILDER_PW_HASH@","BUILDER_HASH_V"),
-                   ("@FIPS_ARG@","FIPS_V"),("@CIS_PROFILE@","CIS_PROFILE_V"),
-                   ("@SSG_DS@","SSG_DS_V")]:
+                   ("@FIPS_ARG@","FIPS_V"),("@CIS_PROFILE@","CIS_PROFILE_V"),("@ROOT_PW@","ROOT_PW_V"),
+                   ("@SSG_DS@","SSG_DS_V"),("@STAGE_DS@","STAGE_DS_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
 tgt = sys.argv[1]
 open(f"build/{tgt}/cidata/user-data", "w").write(tmpl)

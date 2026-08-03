@@ -71,31 +71,51 @@ autoinstall:
       - {id: m_varlogaudit, type: mount, device: fs_varlogaudit, path: /var/log/audit, options: "nodev,nosuid,noexec"}
       - {id: m_swap, type: mount, device: fs_swap, path: none}
 
-  # ssg-debderived carries the Ubuntu SCAP datastreams; open-vm-tools is the
-  # MCP control channel, matching the EL targets.
+  # Installed-system apt sources (network + universe). This does NOT affect the
+  # INSTALL-time sources: Subiquity installs `packages:` from the ISO only —
+  # the target's sources.list during install is literally
+  #   deb [check-date=no] file:///cdrom jammy main restricted
+  # so any universe package here fails with
+  #   system-install --download-only <pkg> returned non-zero exit status 100
+  # and Subiquity then waits forever at "Press enter to start a shell".
+  # VERIFIED the hard way — three builds died on exactly this.
+  apt:
+    preserve_sources_list: false
+    disable_components: []
+    primary:
+      - arches: [default]
+        uri: http://archive.ubuntu.com/ubuntu/
+
+  # ONLY packages present on the install media belong here. Everything the
+  # hardening needs (openscap-scanner, ssg-debderived, auditd, aide, chrony)
+  # lives in universe and is installed POST-BOOT via MCP guest ops, where apt
+  # has real network sources and every command's output is observable. See
+  # skills/cis-ova-build (Phase 3) for that step.
   packages:
-    - openscap-scanner
-    - ssg-debderived
     - open-vm-tools
-    - auditd
-    - aide
-    - chrony
 
   # CIS 1.3.1 / 4.1.1.x: auditing active from first boot. FIPS (fips=1) is
   # appended by render.sh when the target opts in.
   kernel:
     package: linux-generic
 
+  # Install-time commands are limited to what needs no network: give root the
+  # build password so ONE credential pair (root + PW_ROOT_BUILD) drives every
+  # VM in the matrix through MCP guest ops. All hardening happens post-boot.
   late-commands:
-    # Everything runs inside the installed system via `curtin in-target`.
-    - curtin in-target -- sed -i 's/^\(GRUB_CMDLINE_LINUX=\).*/\1"audit=1 audit_backlog_limit=8192@FIPS_ARG@"/' /etc/default/grub
-    - curtin in-target -- update-grub
-    - curtin in-target -- systemctl enable auditd chrony open-vm-tools
-    # CIS remediation — oscap exits 2 when it fixed failing rules, which is
-    # success here (same guard as the EL targets).
-    - curtin in-target -- sh -c "oscap xccdf eval --remediate --profile @CIS_PROFILE@ --report /root/ks-remediation-report.html /usr/share/xml/scap/ssg/content/@SSG_DS@ || [ $? -eq 2 ]"
-    # Site policy + residual fixes, applied after remediation so they are final.
-    - curtin in-target -- sh -c "install -d -m 0755 /etc/ssh/sshd_config.d && printf 'AllowGroups sudo\n' > /etc/ssh/sshd_config.d/49-cis-access.conf && chmod 600 /etc/ssh/sshd_config.d/49-cis-access.conf"
-    - curtin in-target -- systemctl mask rsyslog.service systemd-journal-remote.socket bluetooth.service
+    - curtin in-target -- sh -c "echo 'root:@ROOT_PW@' | chpasswd"
+
+  # If the install fails, make the failure diagnosable instead of opaque: give
+  # root the build password (so MCP guest ops work against the half-built
+  # image) and preserve the installer logs onto the target, which Subiquity
+  # only does on success. error-commands run in the installer environment,
+  # where the new root filesystem is mounted at /target.
+  # NOTE: plain `curtin in-target` fails here with "Unable to find target" —
+  # in the error path curtin has no TARGET_MOUNT_POINT, so chroot /target
+  # directly. Verified against a real failed install.
+  error-commands:
+    - chroot /target sh -c "echo 'root:@ROOT_PW@' | chpasswd" || true
+    - cp -a /var/log/installer /target/var/log/installer-failed || true
+    - cp -a /var/log/syslog /target/var/log/installer-syslog || true
 
   shutdown: poweroff

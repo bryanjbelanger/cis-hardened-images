@@ -21,6 +21,27 @@ with `./validate.sh <target|all>`.
 Note the CIS profile id differs by family: EL uses `cis_server_l1`, Ubuntu uses
 `cis_level1_server`. It is a per-target field, not a constant.
 
+### Ubuntu: three facts that differ from EL
+
+1. **`libopenscap8`, not `openscap-scanner`** — that package does not exist on
+   jammy; `libopenscap8` ships `/usr/bin/oscap`. (Verify package existence with
+   `apt-cache policy`, NOT by fetching packages.ubuntu.com — that page returns
+   200 for nonexistent packages.)
+2. **No packaged SCAP content on 22.04.** `ssg-debderived` is not in jammy at
+   all. The pipeline stages a prebuilt datastream extracted from the *noble*
+   `ssg-debderived` deb (~1.9MB), which carries both `ssg-ubuntu2204-ds.xml`
+   and `ssg-ubuntu2404-ds.xml`. No SSG source build is needed.
+3. **Hardening runs post-boot, not at install.** Subiquity installs `packages:`
+   from the ISO only — its install-time sources are literally
+   `deb [check-date=no] file:///cdrom jammy main restricted`, so any universe
+   package there fails the install. `libpam-pwquality` in particular must be
+   installed post-boot: without it, 12 `accounts_password_pam_*` rules silently
+   fail to remediate.
+
+Each build attempt needs a **fresh VM**: once a VM has an installed disk, EFI
+NVRAM prefers booting it over the installer ISO, and a re-run will silently
+boot the old system instead of installing.
+
 ### Ubuntu: the extra install step
 
 Subiquity reads autoinstall config from a **CIDATA**-labeled volume, but that
@@ -114,12 +135,13 @@ through tools.
 Both EL majors built, booted, and audited with `oscap xccdf eval` against
 `cis_server_l1` (2026-08-02):
 
-| Target | Datastream | Pass | Fail | N/A | Total |
-|---|---|---:|---:|---:|---:|
-| Rocky 9 | `ssg-rl9-ds.xml` | 274 | **2** | 17 | 293 |
-| Rocky 10 | `ssg-rl10-ds.xml` | 300 | 8 | 15 | 323 |
+| Target | Datastream | Profile | Pass | Fail | N/A | Total |
+|---|---|---|---:|---:|---:|---:|
+| Rocky 9 | `ssg-rl9-ds.xml` | `cis_server_l1` | 274 | **2** | 17 | 293 |
+| Rocky 10 | `ssg-rl10-ds.xml` | `cis_server_l1` | 300 | 8 | 15 | 323 |
+| Ubuntu 22.04 | `ssg-ubuntu2204-ds.xml` (staged) | `cis_level1_server` | 353 | **3** | 37 | 398 |
 
-All 21 partition and mount-option rules pass on both — `/tmp` and `/dev/shm`
+All 21 partition and mount-option rules pass on all three — `/tmp` and `/dev/shm`
 separation, plus `nodev`/`nosuid`/`noexec` across `/home`, `/tmp`, `/var`,
 `/var/tmp`, `/var/log`, `/var/log/audit`, `/dev/shm`.
 
@@ -139,6 +161,7 @@ plus `ensure_redhat_gpgkey_installed` and
 | `grub2_password` | **Accepted exception** | A bootloader password baked into a distributable OVA is shared by every recipient, and does not protect an image whose virtual disk can simply be mounted. Deployers should run `grub2-setpassword` after deploying to a real host. |
 | `service_systemd-journal-upload_enabled` | **Accepted exception** | Requires a remote log host in `/etc/systemd/journal-upload.conf`; there is no correct site-neutral value. Deployers configure their log server and enable the unit. |
 | `ensure_redhat_gpgkey_installed` | **False positive** | The rule checks for Red Hat's GPG key; RHEL rebuilds ship their own vendor key. Not applicable to Rocky/Alma. |
+| `service_nftables_enabled` (Ubuntu) | **Unsatisfiable pair** | The CIS Ubuntu profile contains BOTH `service_nftables_enabled` and `service_nftables_disabled`, because the benchmark expects one firewall utility to be chosen. ufw is Ubuntu's default, so nftables is masked and this rule cannot pass — exactly one of the pair fails whichever way you go. |
 | `accounts_password_last_change_is_in_past` | **Build artifact** | Passwords are set minutes before the audit. The seal step's `chage -d 0 builder` resolves it in the shipped image. |
 
 Fixed in `%post` rather than excepted: `sshd_limit_user_access`
