@@ -1,0 +1,105 @@
+name: Build hardened images
+
+# Builds run on a self-hosted macOS runner because they drive VMware Fusion and
+# VirtualBox directly — a hypervisor cannot run inside a GitHub-hosted runner or
+# a Kubernetes pod (which is also why the ARC runners in the cluster cannot serve
+# this repo).
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Target from targets/ (rocky9, rocky10, ubuntu2404, ...)"
+        required: true
+        default: rocky9
+      hypervisor:
+        description: "fusion or virtualbox"
+        required: true
+        default: fusion
+        type: choice
+        options: [fusion, virtualbox]
+      fips:
+        description: "Enable FIPS mode (EL targets only)"
+        required: false
+        default: "no"
+        type: choice
+        options: ["no", "yes"]
+      publish:
+        description: "Attach the OVA to a GitHub release"
+        required: false
+        default: "no"
+        type: choice
+        options: ["no", "yes"]
+  schedule:
+    # Monthly rebuild for CVE currency. Each image is ~60-75 min end to end and
+    # the Mac runs one at a time, so a full matrix is an overnight job — keep
+    # this to a single canary and drive full rebuilds with workflow_dispatch.
+    - cron: "0 7 1 * *"
+
+# One build at a time: each needs the hypervisor, ~25GB scratch and exclusive
+# use of the VM name.
+concurrency:
+  group: hardened-image-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, hypervisor]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight
+        run: |
+          set -e
+          echo "target=${{ inputs.target || 'rocky9' }} hypervisor=${{ inputs.hypervisor || 'fusion' }} fips=${{ inputs.fips || 'no' }}"
+          for t in xorriso hdiutil VBoxManage; do command -v $t >/dev/null || { echo "MISSING: $t"; exit 1; }; done
+          test -x "/Applications/VMware Fusion.app/Contents/Library/VMware OVF Tool/ovftool" || { echo "MISSING: ovftool"; exit 1; }
+          df -g / | tail -1 | awk '{ if ($4 < 40) { print "LOW DISK: " $4 "GB free, need ~40GB"; exit 1 } else print "disk ok: " $4 "GB free" }'
+
+      - name: Build credentials
+        env:
+          PW_ROOT_BUILD: ${{ secrets.PW_ROOT_BUILD }}
+          PW_BUILDER: ${{ secrets.PW_BUILDER }}
+        run: |
+          # Build passwords are not shipped secrets — the seal step locks root
+          # and expires builder — but they must not land in the repo either.
+          # Fall back to the runner's existing local-creds.env when the secrets
+          # are not configured, so a hand-run on this Mac still works.
+          if [ -n "$PW_ROOT_BUILD" ] && [ -n "$PW_BUILDER" ]; then
+            printf 'PW_ROOT_BUILD=%s\nPW_BUILDER=%s\n' "$PW_ROOT_BUILD" "$PW_BUILDER" > local-creds.env
+            echo "credentials written from repository secrets"
+          elif [ -f "$HOME/cis-build-creds/local-creds.env" ]; then
+            cp "$HOME/cis-build-creds/local-creds.env" local-creds.env
+            echo "credentials taken from the runner's local store"
+          else
+            echo "No credentials: set PW_ROOT_BUILD/PW_BUILDER secrets, or place"
+            echo "local-creds.env in ~/cis-build-creds/ on the runner."
+            exit 1
+          fi
+          chmod 600 local-creds.env
+
+      - name: Render and validate
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q pykickstart passlib pyyaml
+          FIPS=${{ inputs.fips || 'no' }} ./render.sh "${{ inputs.target || 'rocky9' }}"
+          ./validate.sh "${{ inputs.target || 'rocky9' }}"
+
+      # The build itself is still driven interactively through the MCP servers
+      # (they own VM lifecycle, guest ops and export). This step is the hook for
+      # a headless driver script; until that exists the workflow stops here with
+      # validated inputs, which is still worth running on every change.
+      - name: Build image
+        if: ${{ inputs.publish == 'yes' }}
+        run: |
+          echo "Headless build driver not implemented yet."
+          echo "Today the build is driven through the MCP servers; see the"
+          echo "cis-ova-build skill for the procedure."
+          exit 1
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f local-creds.env
