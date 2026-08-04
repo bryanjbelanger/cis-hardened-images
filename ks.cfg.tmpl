@@ -22,7 +22,7 @@ network --bootproto=dhcp --device=link --activate --hostname=@HOSTNAME@
 firstboot --disable
 selinux --enforcing
 firewall --enabled --ssh
-services --enabled=auditd,firewalld,chronyd,vmtoolsd
+services --enabled=auditd,firewalld,chronyd,@GUEST_SVCS_CSV@
 
 # Install source: `cdrom` for minimal/dvd ISOs (BaseOS on the media);
 # CentOS Stream boot ISOs carry no packages, so their targets use
@@ -71,12 +71,13 @@ user --name=builder --groups=wheel --gecos="Build/audit account" --password=@BUI
 # BaseOS repo (EL10 minimal lacks fuse3/dbus-tools that open-vm-tools needs).
 # CS targets leave BASEOS_REPO empty: their `url` source IS network BaseOS.
 @BASEOS_REPO@
+@GUEST_REPO@
 repo --name=AppStream --baseurl=@APPSTREAM_URL@
 %packages
 @^minimal-environment
 openscap-scanner
 scap-security-guide
-open-vm-tools
+@GUEST_PKGS@
 audit
 aide
 chrony
@@ -84,8 +85,9 @@ firewalld
 %end
 
 %post --log=/root/ks-post.log
-# vmtoolsd is the MCP control channel (vmrun guest ops) — must survive boot.
-systemctl enable vmtoolsd auditd firewalld chronyd
+# The guest agent is the MCP control channel for this hypervisor (vmrun guest
+# ops on VMware, VBoxManage guestcontrol on VirtualBox) — it must survive boot.
+systemctl enable @GUEST_SVCS@ auditd firewalld chronyd
 @FIPS_POST@
 @POST_HARDEN@
 @FIPS_POST2@
@@ -115,5 +117,10 @@ systemctl mask bluetooth.service 2>/dev/null || true
 # here, so the baseline reflects the final sealed state.
 %end
 
-# Power off when done so the host pipeline knows installation finished.
-poweroff
+# End-of-install behaviour depends on who is driving:
+#   poweroff       — the MCP flow: the host watches for power-off, then boots
+#                    the installed system itself.
+#   reboot --eject — the Packer flow: Packer waits for SSH on the INSTALLED
+#                    system, so it must come back up. --eject drops the install
+#                    media first, otherwise EFI boots the installer again.
+@SHUTDOWN@

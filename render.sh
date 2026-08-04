@@ -25,6 +25,45 @@ render_one() {
   # does not require it, and it breaks clients that only speak non-approved
   # algorithms.
   local fips_eff="${fips_cli:-${FIPS:-no}}"
+
+  # HYPERVISOR selects the guest agent — the daemon each hypervisor's management
+  # tooling talks to. Without the right one the MCP server for that hypervisor
+  # cannot run guest operations against the image at all, which is the whole
+  # point of these builds. Extend this case for new hypervisors; nothing else
+  # in the template is hypervisor-specific.
+  #
+  # EL note: virtualbox-guest-additions lives in EPEL, so that target also pulls
+  # the EPEL repo in at install time. RHEL-family kernels strip the in-tree
+  # vboxguest/vboxsf modules (verified absent on Rocky 9), so the package is
+  # genuinely required — it is not just userspace.
+  local guest_pkgs guest_svcs guest_repo=""
+  case "${HYPERVISOR:-vmware}" in
+    vmware)
+      guest_pkgs="open-vm-tools"; guest_svcs="vmtoolsd" ;;
+    virtualbox)
+      # Package name differs by family: EL uses virtualbox-guest-additions
+      # (EPEL), Debian/Ubuntu use virtualbox-guest-utils (universe, no EPEL).
+      if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
+        guest_pkgs="virtualbox-guest-utils"; guest_svcs="virtualbox-guest-utils"
+      else
+        guest_pkgs="virtualbox-guest-additions"; guest_svcs="vboxservice"
+      fi
+      guest_repo="repo --name=epel --baseurl=https://dl.fedoraproject.org/pub/epel/${EL_MAJOR:-9}/Everything/x86_64/" ;;
+    qemu|kvm)
+      guest_pkgs="qemu-guest-agent"; guest_svcs="qemu-guest-agent" ;;
+    hyperv)
+      guest_pkgs="hyperv-daemons"; guest_svcs="hypervkvpd hypervvssd hypervfcopyd" ;;
+    *)
+      echo "unknown HYPERVISOR: ${HYPERVISOR} (vmware|virtualbox|qemu|hyperv)" >&2; return 1 ;;
+  esac
+  local guest_svcs_csv="${guest_svcs// /,}"
+
+  # DRIVER=packer renders a kickstart that reboots into the installed system
+  # (Packer provisions over SSH); anything else powers off for the MCP flow.
+  local shutdown_stanza="poweroff"
+  if [[ ${DRIVER:-mcp} == packer ]]; then
+    shutdown_stanza="reboot --eject"
+  fi
   # FIPS is enabled in %post with fips-mode-setup, NOT via a fips=1 bootloader
   # arg: with a separate /boot (which the CIS layout mandates) dracut also needs
   # boot=UUID=..., and that UUID does not exist at kickstart-authoring time.
@@ -95,14 +134,14 @@ oscap xccdf eval --remediate \\
     local pw_hash
     pw_hash=$(PW_BUILDER="$PW_BUILDER" .venv/bin/python -c \
       "from passlib.hash import sha512_crypt;import os;print(sha512_crypt.hash(os.environ['PW_BUILDER']))")
-    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD \
+    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs \
     CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS STAGE_DS_V=$stage_ds \
     python3 - "$tgt" << 'PYEOF'
 import os, sys
 tmpl = open("autoinstall.tmpl").read()
 for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@BUILDER_PW_HASH@","BUILDER_HASH_V"),
                    ("@FIPS_ARG@","FIPS_V"),("@CIS_PROFILE@","CIS_PROFILE_V"),("@ROOT_PW@","ROOT_PW_V"),
-                   ("@SSG_DS@","SSG_DS_V"),("@STAGE_DS@","STAGE_DS_V")]:
+                   ("@SSG_DS@","SSG_DS_V"),("@STAGE_DS@","STAGE_DS_V"),("@GUEST_PKGS@","GUEST_PKGS_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
 tgt = sys.argv[1]
 open(f"build/{tgt}/cidata/user-data", "w").write(tmpl)
@@ -118,7 +157,7 @@ PYEOF
   HOSTNAME_V=$HOSTNAME INSTALL_SRC_V=$INSTALL_SRC APPSTREAM_V=$APPSTREAM_URL \
   ROOT_PW_V=$PW_ROOT_BUILD BUILDER_PW_V=$PW_BUILDER \
   HARDEN_V=$harden_block POST_HARDEN_V=$post_harden BASEOS_V=$BASEOS_REPO \
-  FIPS_V=$fips_arg FIPS_POST_V=$fips_post FIPS_POST2_V=$fips_post2 \
+  FIPS_V=$fips_arg FIPS_POST_V=$fips_post FIPS_POST2_V=$fips_post2 SHUTDOWN_V=$shutdown_stanza GUEST_PKGS_V=$guest_pkgs GUEST_SVCS_V=$guest_svcs GUEST_SVCS_CSV_V=$guest_svcs_csv GUEST_REPO_V=$guest_repo \
   python3 - "$tgt" << 'PYEOF'
 import os, sys
 tmpl = open("ks.cfg.tmpl").read()
@@ -126,7 +165,7 @@ for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@INSTALL_SRC@","INSTALL_SRC_V")
                    ("@APPSTREAM_URL@","APPSTREAM_V"),("@ROOT_PW@","ROOT_PW_V"),
                    ("@BUILDER_PW@","BUILDER_PW_V"),("@HARDEN_BLOCK@","HARDEN_V"),
                    ("@POST_HARDEN@","POST_HARDEN_V"),("@BASEOS_REPO@","BASEOS_V"),
-                   ("@FIPS_ARG@","FIPS_V"),("@FIPS_POST@","FIPS_POST_V"),("@FIPS_POST2@","FIPS_POST2_V")]:
+                   ("@FIPS_ARG@","FIPS_V"),("@FIPS_POST@","FIPS_POST_V"),("@FIPS_POST2@","FIPS_POST2_V"),("@SHUTDOWN@","SHUTDOWN_V"),("@GUEST_PKGS@","GUEST_PKGS_V"),("@GUEST_SVCS@","GUEST_SVCS_V"),("@GUEST_SVCS_CSV@","GUEST_SVCS_CSV_V"),("@GUEST_REPO@","GUEST_REPO_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
 out = f"build/{sys.argv[1]}/ks/ks.cfg"
 open(out, "w").write(tmpl)
