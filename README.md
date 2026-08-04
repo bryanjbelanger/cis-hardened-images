@@ -167,6 +167,9 @@ Both EL majors built, booted, and audited with `oscap xccdf eval` against
 | Rocky 9 | `ssg-rl9-ds.xml` | `cis_server_l1` | 274 | **2** | 17 | 293 |
 | Rocky 10 | `ssg-rl10-ds.xml` | `cis_server_l1` | 300 | 8 | 15 | 323 |
 | Ubuntu 22.04 | `ssg-ubuntu2204-ds.xml` (staged) | `cis_level1_server` | 353 | **3** | 37 | 398 |
+| Ubuntu 24.04 (sealed, shipped) | `ssg-ubuntu2404-ds.xml` (staged) | `cis_level1_server` | 360 | **2** | 39 | 408 |
+| Rocky 9 + FIPS | `ssg-rl9-ds.xml` | `cis_server_l1` | 274 | **2** | 17 | 293 |
+| Rocky 9 on **VirtualBox** | `ssg-rl9-ds.xml` | `cis_server_l1` | 274 | **2** | 17 | 293 |
 | Ubuntu 24.04 | `ssg-ubuntu2404-ds.xml` (staged) | `cis_level1_server` | 360 | **2** | 39 | 408 |
 
 All 21 partition and mount-option rules pass on all four — `/tmp` and `/dev/shm`
@@ -181,6 +184,26 @@ the same set. Its extra failures were `sshd_limit_user_access`, the two
 journald/rsyslog rules, `service_bluetooth_disabled` (all now fixed in `%post`),
 plus `ensure_redhat_gpgkey_installed` and
 `service_systemd-journal-upload_enabled` (both excepted below).
+
+## Hypervisor portability
+
+The same kickstart builds identically on **VMware Fusion** and **VirtualBox**:
+Rocky 9 scores 274 pass / 2 fail on both, with all 21 partition/mount rules
+passing. The OEMDRV delivery mechanism, the CIS layout and the `%post`
+remediation are all hypervisor-independent — only VM creation and guest access
+differ, and those live in the MCP servers, not the provisioning files.
+
+Fusion and VMware Workstation share the VMX/VMDK format, so a Fusion build
+covers both; keep `virtualHW.version` conservative (19) so older Workstation
+releases can open the result.
+
+**Guest access during the build differs by hypervisor.** VMware exposes guest
+operations through VMware Tools, which these images already install. VirtualBox's
+equivalent (`VBoxManage guestcontrol`) requires Guest Additions, which drag in
+gcc/make and do not belong in a hardened minimal image — so VirtualBox builds use
+SSH over a NAT port-forward instead, and the shipped image stays clean. Note the
+hardened sshd rate-limits connections (`MaxStartups`): drive it with one
+connection at a time, not a burst.
 
 ## Distribution
 
