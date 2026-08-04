@@ -8,6 +8,11 @@
 # Run this only after the final audit — every change here alters the system,
 # and the AIDE baseline must describe the shipped state, not an earlier one.
 set -u
+# Deliberately NOT `set -e`: several steps here fail by design (dd filling a
+# filesystem, shred on absent files) and callers differ — Packer runs scripts
+# with `bash -eux`, the MCP path with plain `bash`. Every command that matters
+# is checked explicitly instead.
+set +e
 
 log() { echo "[seal] $*"; }
 
@@ -31,8 +36,15 @@ rm -f /root/.bash_history /home/*/.bash_history 2>/dev/null
 # exists and is empty.
 log "clearing machine-id"
 : > /etc/machine-id
-rm -f /var/lib/dbus/machine-id 2>/dev/null
-ln -sf /etc/machine-id /var/lib/dbus/machine-id 2>/dev/null
+# The dbus compat symlink only applies where /var/lib/dbus exists. It does NOT
+# on minimal Rocky 9 (modern dbus reads /etc/machine-id directly), and `ln` into
+# a missing directory fails — which aborts the whole seal when the script is run
+# under `bash -e`, as Packer does. The MCP path used a looser invocation and
+# silently sailed past this.
+if [ -d /var/lib/dbus ]; then
+  rm -f /var/lib/dbus/machine-id
+  ln -sf /etc/machine-id /var/lib/dbus/machine-id
+fi
 
 # --------------------------------------------------------------- ssh host keys
 # Shipping host keys would make every deployment of this image present the same
@@ -62,8 +74,8 @@ log "initializing AIDE baseline (this takes a few minutes)"
 # `aide --init` as root produces the same database in /var/lib/aide and never
 # touches /var/log. Verified on Ubuntu 24.04.
 if command -v aide >/dev/null 2>&1; then
-  aide --config=/etc/aide/aide.conf --init > /root/aide-init.log 2>&1
-  rc=$?
+  rc=0
+  aide --config=/etc/aide/aide.conf --init > /root/aide-init.log 2>&1 || rc=$?
   for db in /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.new; do
     [ -s "$db" ] && mv -f "$db" "${db/.new/}"
   done
@@ -88,7 +100,9 @@ for mp in $(findmnt -rno TARGET -t ext4,xfs 2>/dev/null); do
     /proc*|/sys*|/dev*|/run*) continue ;;
   esac
   log "  zeroing $mp"
-  dd if=/dev/zero of="${mp}/.zerofill" bs=1M status=none 2>/dev/null
+  # dd MUST fail here with ENOSPC — filling the filesystem is the entire point.
+  # Without `|| true` this aborts the seal when run under `bash -e` (Packer).
+  dd if=/dev/zero of="${mp}/.zerofill" bs=1M status=none 2>/dev/null || true
   sync
   rm -f "${mp}/.zerofill"
   sync

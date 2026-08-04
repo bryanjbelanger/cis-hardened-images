@@ -143,6 +143,11 @@ build {
   # MCP flow exactly, so results stay comparable to the hand-driven baselines.
   provisioner "shell" {
     execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
+    # A long oscap run can drop the SSH session — observed as a guest kernel
+    # soft lockup ("CPU#1 stuck for 31s [oscap]") when the host was
+    # oversubscribed by other VMs. Tolerate it: the post-reboot pass below
+    # re-runs remediation and completes anything this pass missed.
+    expect_disconnect = true
     inline = [
       "oscap xccdf eval --remediate --profile ${var.cis_profile} --report /root/remediation.html /usr/share/xml/scap/ssg/content/${var.ssg_ds} || [ $? -eq 2 ]",
     ]
