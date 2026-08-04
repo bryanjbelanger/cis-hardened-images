@@ -56,9 +56,11 @@ echo "    clearing $OUT_DIR"
 rm -rf "$OUT_DIR"
 
 echo "==> rendering (DRIVER=packer, HYPERVISOR=$HYPERVISOR, FIPS=$FIPS_MODE)"
+export RENDER_SUFFIX="-${HV}"
 DRIVER=packer HYPERVISOR="$HYPERVISOR" FIPS="$FIPS_MODE" ./render.sh "$TARGET"
 ./validate.sh "$TARGET"
 
 echo "==> packer build"
 exec packer build -on-error=abort -only="$ONLY" \
+  -var "render_suffix=-${HV}" \
   -var-file="packer/vars/${TARGET}.pkrvars.hcl" packer/

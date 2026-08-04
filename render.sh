@@ -129,12 +129,13 @@ oscap xccdf eval --remediate \\
   #                 CIDATA-labeled ISO, and the installer ISO must ALSO be
   #                 repacked with `autoinstall` on the kernel cmdline (see README).
   if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
-    mkdir -p "build/${tgt}/cidata"
+    local outdir="build/${tgt}${RENDER_SUFFIX:-}/cidata"
+    mkdir -p "$outdir"
     # identity.password must be an SHA-512 crypt hash, not plaintext.
     local pw_hash
     pw_hash=$(PW_BUILDER="$PW_BUILDER" .venv/bin/python -c \
       "from passlib.hash import sha512_crypt;import os;print(sha512_crypt.hash(os.environ['PW_BUILDER']))")
-    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs \
+    OUTDIR_V=$outdir HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs \
     CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS STAGE_DS_V=$stage_ds \
     python3 - "$tgt" << 'PYEOF'
 import os, sys
@@ -144,20 +145,25 @@ for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@BUILDER_PW_HASH@","BUILDER_HAS
                    ("@SSG_DS@","SSG_DS_V"),("@STAGE_DS@","STAGE_DS_V"),("@GUEST_PKGS@","GUEST_PKGS_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
 tgt = sys.argv[1]
-open(f"build/{tgt}/cidata/user-data", "w").write(tmpl)
+open(os.environ["OUTDIR_V"] + "/user-data", "w").write(tmpl)
 # NoCloud requires meta-data to exist, even if empty but for instance-id.
-open(f"build/{tgt}/cidata/meta-data", "w").write(f"instance-id: {tgt}\nlocal-hostname: {os.environ['HOSTNAME_V']}\n")
+open(os.environ["OUTDIR_V"] + "/meta-data", "w").write(f"instance-id: {tgt}\nlocal-hostname: {os.environ['HOSTNAME_V']}\n")
 print(f"rendered build/{tgt}/cidata/{{user-data,meta-data}}")
 PYEOF
     return
   fi
 
-  mkdir -p "build/${tgt}/ks"
+  # RENDER_SUFFIX keeps concurrent builds of the SAME target apart. Without it,
+  # a fusion and a virtualbox build render to one path and race: the second
+  # overwrites the first's kickstart before Packer bakes it into the OEMDRV ISO,
+  # and BOTH installs get the wrong guest agent. Verified the hard way.
+  local outdir="build/${tgt}${RENDER_SUFFIX:-}/ks"
+  mkdir -p "$outdir"
   # python replaces tokens verbatim — no sed-escaping pitfalls with URLs/slashes.
   HOSTNAME_V=$HOSTNAME INSTALL_SRC_V=$INSTALL_SRC APPSTREAM_V=$APPSTREAM_URL \
   ROOT_PW_V=$PW_ROOT_BUILD BUILDER_PW_V=$PW_BUILDER \
   HARDEN_V=$harden_block POST_HARDEN_V=$post_harden BASEOS_V=$BASEOS_REPO \
-  FIPS_V=$fips_arg FIPS_POST_V=$fips_post FIPS_POST2_V=$fips_post2 SHUTDOWN_V=$shutdown_stanza GUEST_PKGS_V=$guest_pkgs GUEST_SVCS_V=$guest_svcs GUEST_SVCS_CSV_V=$guest_svcs_csv GUEST_REPO_V=$guest_repo \
+  OUTDIR_V=$outdir FIPS_V=$fips_arg FIPS_POST_V=$fips_post FIPS_POST2_V=$fips_post2 SHUTDOWN_V=$shutdown_stanza GUEST_PKGS_V=$guest_pkgs GUEST_SVCS_V=$guest_svcs GUEST_SVCS_CSV_V=$guest_svcs_csv GUEST_REPO_V=$guest_repo \
   python3 - "$tgt" << 'PYEOF'
 import os, sys
 tmpl = open("ks.cfg.tmpl").read()
@@ -167,7 +173,7 @@ for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@INSTALL_SRC@","INSTALL_SRC_V")
                    ("@POST_HARDEN@","POST_HARDEN_V"),("@BASEOS_REPO@","BASEOS_V"),
                    ("@FIPS_ARG@","FIPS_V"),("@FIPS_POST@","FIPS_POST_V"),("@FIPS_POST2@","FIPS_POST2_V"),("@SHUTDOWN@","SHUTDOWN_V"),("@GUEST_PKGS@","GUEST_PKGS_V"),("@GUEST_SVCS@","GUEST_SVCS_V"),("@GUEST_SVCS_CSV@","GUEST_SVCS_CSV_V"),("@GUEST_REPO@","GUEST_REPO_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
-out = f"build/{sys.argv[1]}/ks/ks.cfg"
+out = os.environ["OUTDIR_V"] + "/ks.cfg"
 open(out, "w").write(tmpl)
 print(f"rendered {out}")
 PYEOF

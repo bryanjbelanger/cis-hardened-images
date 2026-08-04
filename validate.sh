@@ -19,7 +19,7 @@ check_one() {
   source "targets/${tgt}.env"
 
   if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
-    local f="build/${tgt}/cidata/user-data"
+    local f="build/${tgt}${RENDER_SUFFIX:-}/cidata/user-data"
     [[ -f $f ]] || { echo "✗ $tgt: not rendered ($f missing)"; fail=1; return; }
     if USER_DATA="$f" .venv/bin/python - << 'PYEOF'
 import os, sys, yaml
@@ -63,7 +63,7 @@ PYEOF
     else echo "✗ $tgt"; fail=1
     fi
   else
-    local f="build/${tgt}/ks/ks.cfg"
+    local f="build/${tgt}${RENDER_SUFFIX:-}/ks/ks.cfg"
     [[ -f $f ]] || { echo "✗ $tgt: not rendered ($f missing)"; fail=1; return; }
     if .venv/bin/ksvalidator -v "RHEL${EL_MAJOR}" "$f" > /dev/null 2>&1; then
       echo "✓ $tgt (kickstart: RHEL${EL_MAJOR} syntax)"

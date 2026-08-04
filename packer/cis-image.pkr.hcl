@@ -65,6 +65,10 @@ variable "cpus" {
   type    = number
   default = 2
 }
+variable "render_suffix" {
+  type    = string
+  default = ""
+}
 variable "output_dir" {
   type    = string
   default = "build/packer"
@@ -73,7 +77,7 @@ variable "output_dir" {
 locals {
   # render.sh writes the kickstart here; Packer turns the directory into the
   # OEMDRV ISO itself, so make_iso is no longer needed for EL targets.
-  ks_dir = "build/${var.target}/ks"
+  ks_dir = "build/${var.target}${var.render_suffix}/ks"
 }
 
 source "vmware-iso" "cis" {
