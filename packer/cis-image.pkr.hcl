@@ -127,6 +127,17 @@ source "virtualbox-iso" "cis" {
   # image. Packer reaches the guest over its own NAT port-forward instead.
   guest_additions_mode = "disable"
 
+  # EFI + VirtualBox will not boot the installer unless the DVD is explicitly
+  # first in the boot order — the VM sat at a black screen for 35 minutes with
+  # a 2MB disk, having never reached a bootloader. The hand-driven build set
+  # this with `--boot1 dvd` and worked; Packer does not set it for us.
+  vboxmanage = [
+    ["modifyvm", "{{.Name}}", "--boot1", "dvd"],
+    ["modifyvm", "{{.Name}}", "--boot2", "disk"],
+    ["modifyvm", "{{.Name}}", "--boot3", "none"],
+    ["modifyvm", "{{.Name}}", "--boot4", "none"],
+  ]
+
   communicator           = "ssh"
   ssh_username           = var.ssh_username
   ssh_password           = var.ssh_password

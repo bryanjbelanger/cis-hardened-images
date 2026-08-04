@@ -31,14 +31,25 @@ OUT_DIR="build/packer/${VM_NAME}-${OUT_SUFFIX}"
 echo "==> stopping any leftover build VMs"
 # `grep` exits 1 when nothing matches, which is the NORMAL case here — with
 # `set -euo pipefail` that silently killed the whole script. Hence `|| true`.
-"$VMRUN" -T fusion list 2>/dev/null | grep -F "$(pwd)/build/packer" || true | while read -r vmx; do
+# Scope to THIS build's VM only. Matching all of build/packer killed a
+# concurrently-running build of the other hypervisor — the cleanup must never
+# touch a sibling build.
+"$VMRUN" -T fusion list 2>/dev/null | grep -F "$(pwd)/$OUT_DIR/" || true | while read -r vmx; do
   [ -n "${vmx:-}" ] || continue
   echo "    stopping $(basename "$vmx")"; "$VMRUN" -T fusion stop "$vmx" hard >/dev/null 2>&1 || true
 done
-VBoxManage list runningvms 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' | grep -F "$TARGET" || true | while read -r vm; do
-  [ -n "${vm:-}" ] || continue
-  echo "    stopping vbox $vm"; VBoxManage controlvm "$vm" poweroff >/dev/null 2>&1 || true
-done
+# VirtualBox registers machines by name GLOBALLY, so a leftover registration —
+# even powered off — makes the next build fail with "Machine settings file
+# already exists". Stopping is not enough; it must be unregistered and deleted.
+if [ "$HV" = virtualbox ]; then
+  if VBoxManage showvminfo "$VM_NAME" >/dev/null 2>&1; then
+    echo "    removing existing vbox VM $VM_NAME"
+    VBoxManage controlvm "$VM_NAME" poweroff >/dev/null 2>&1 || true
+    sleep 2
+    VBoxManage unregistervm "$VM_NAME" --delete >/dev/null 2>&1 || true
+  fi
+  rm -rf "$HOME/VirtualBox VMs/$VM_NAME"
+fi
 # WAIT for vmware-vmx to actually exit before touching the directory. A fixed
 # `sleep 3` was not enough: removing the VM's files while the process still held
 # them left a zombie vmx, and the next build died with

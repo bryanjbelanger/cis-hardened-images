@@ -99,12 +99,34 @@ jobs:
       # a headless driver script; until that exists the workflow stops here with
       # validated inputs, which is still worth running on every change.
       - name: Build image
-        if: ${{ inputs.publish == 'yes' }}
         run: |
-          echo "Headless build driver not implemented yet."
-          echo "Today the build is driven through the MCP servers; see the"
-          echo "cis-ova-build skill for the procedure."
-          exit 1
+          # build-packer.sh owns cleanup ordering, render isolation and the
+          # hypervisor-specific quirks. Do not inline packer here.
+          ./build-packer.sh "${{ inputs.target }}" "${{ inputs.hypervisor }}" "${{ inputs.fips }}"
+
+      - name: Publish artifacts
+        if: ${{ inputs.publish == 'yes' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="images-$(date +%Y%m%d)"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+            --title "Hardened images $(date +%Y-%m-%d)" \
+            --notes "CIS-hardened images. See README for first-login steps and accepted exceptions."
+          for f in build/packer/*.ova build/packer/*.sha256 build/packer/*audit*.txt build/packer/*seal*.log; do
+            [ -f "$f" ] && gh release upload "$TAG" "$f" --clobber
+          done
+
+      - name: Build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ inputs.target }}-${{ inputs.hypervisor }}-fips${{ inputs.fips }}
+          path: |
+            build/packer/*audit*.txt
+            build/packer/*seal*.log
+          if-no-files-found: warn
 
       - name: Cleanup credentials
         if: always()

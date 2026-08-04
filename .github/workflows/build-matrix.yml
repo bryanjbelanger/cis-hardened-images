@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       max_parallel:
-        description: "Concurrent builds (host has 64GB RAM / 8 physical cores; 4 fits comfortably at 4GB+2vCPU each)"
+        description: "Concurrent builds. 1 is the only value proven on this host — 2 caused guest kernel stalls and both builds timed out."
         required: false
-        default: "4"
+        default: "1"
       publish:
         description: "Attach OVAs to a GitHub release"
         required: false
@@ -26,7 +26,13 @@ jobs:
       # Never cancel siblings: a failure in one image must not discard three
       # other 70-minute builds that are already most of the way through.
       fail-fast: false
-      max-parallel: 4
+      # MEASURED, not estimated. 4 was sized from RAM and core count and was
+      # wrong: two concurrent builds on this host produced guest kernel stalls
+      # (RCU stall in vmwgfx on VMware; the VirtualBox installer wedged 12s in)
+      # and both timed out waiting for SSH. The binding constraint is vCPU
+      # scheduling latency inside guests during install, which bites long before
+      # the host looks busy. Raise only with evidence.
+      max-parallel: 1
       matrix:
         include:
           - { target: rocky9,     hypervisor: fusion,     fips: "no"  }
