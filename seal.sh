@@ -55,15 +55,23 @@ journalctl --rotate --vacuum-time=1s >/dev/null 2>&1 || true
 # Built LAST so the integrity baseline describes the sealed system. Anything
 # changed after this point will legitimately show as tampering.
 log "initializing AIDE baseline (this takes a few minutes)"
-if command -v aideinit >/dev/null 2>&1; then
-  aideinit -y -f >/dev/null 2>&1                       # Ubuntu wrapper
-elif command -v aide >/dev/null 2>&1; then
-  aide --init >/dev/null 2>&1
+# Deliberately NOT `aideinit`: Ubuntu's wrapper hardcodes a log path under
+# /var/log/aide and drops to the _aide user, which forces that directory to be
+# _aide-owned — in direct conflict with CIS's root:syslog requirement for
+# everything under /var/log. Satisfying one broke the other, repeatedly.
+# `aide --init` as root produces the same database in /var/lib/aide and never
+# touches /var/log. Verified on Ubuntu 24.04.
+if command -v aide >/dev/null 2>&1; then
+  aide --config=/etc/aide/aide.conf --init > /root/aide-init.log 2>&1
+  rc=$?
   for db in /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.new; do
-    [ -f "$db" ] && mv -f "$db" "${db/.new/}"
+    [ -s "$db" ] && mv -f "$db" "${db/.new/}"
   done
+  log "aide --init exit=$rc"
+else
+  log "WARNING: aide not installed — no integrity baseline"
 fi
-log "AIDE baseline: $(ls -1 /var/lib/aide/aide.db* 2>/dev/null | tr '\n' ' ')"
+log "AIDE baseline: $(ls -l /var/lib/aide/aide.db 2>/dev/null | awk '{print $5" bytes"}')"
 
 # ------------------------------------------------------------- free-space zero
 # THE size lever. ovftool compresses the disk, but unallocated blocks still hold

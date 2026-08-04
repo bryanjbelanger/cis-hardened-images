@@ -165,6 +165,18 @@ journald/rsyslog rules, `service_bluetooth_disabled` (all now fixed in `%post`),
 plus `ensure_redhat_gpgkey_installed` and
 `service_systemd-journal-upload_enabled` (both excepted below).
 
+## Distribution
+
+A sealed Ubuntu 24.04 image exports to **1.51 GB** — under GitHub's 2 GiB
+release-asset cap, with ~0.5 GB headroom. Free-space zeroing is what makes this
+work: the same image exported at **2.85 GB** before zeroing, and `--compress=9`
+alone only reached 2.81 GB, because unallocated blocks held deleted-file
+garbage that will not compress.
+
+Shrinking the virtual disk does NOT help meaningfully: OVA size tracks
+*allocated* blocks, not the declared size. The measured image had ~2.9 GB of
+live data inside a 5.2 GB allocated disk on a 25 GB declaration.
+
 ## Known-exceptions log
 
 | Rule | Status | Rationale |
