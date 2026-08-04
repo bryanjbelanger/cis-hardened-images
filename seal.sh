@@ -81,8 +81,21 @@ log "initializing AIDE baseline (this takes a few minutes)"
 # `aide --init` as root produces the same database in /var/lib/aide and never
 # touches /var/log. Verified on Ubuntu 24.04.
 if command -v aide >/dev/null 2>&1; then
+  # Config path differs by family: EL ships /etc/aide.conf, Debian/Ubuntu ship
+  # /etc/aide/aide.conf. Hardcoding the Ubuntu path made aide exit 18
+  # ("error in configuration") on Rocky 9 and produce NO baseline — caught only
+  # because the seal log is verified before accounts are locked.
+  AIDE_CONF=""
+  for c in /etc/aide.conf /etc/aide/aide.conf; do
+    [ -f "$c" ] && { AIDE_CONF="$c"; break; }
+  done
   rc=0
-  aide --config=/etc/aide/aide.conf --init > /root/aide-init.log 2>&1 || rc=$?
+  if [ -n "$AIDE_CONF" ]; then
+    log "using aide config $AIDE_CONF"
+    aide --config="$AIDE_CONF" --init > /root/aide-init.log 2>&1 || rc=$?
+  else
+    rc=127; log "WARNING: no aide config found"
+  fi
   for db in /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.new; do
     [ -s "$db" ] && mv -f "$db" "${db/.new/}"
   done
@@ -90,7 +103,11 @@ if command -v aide >/dev/null 2>&1; then
 else
   log "WARNING: aide not installed — no integrity baseline"
 fi
-log "AIDE baseline: $(ls -l /var/lib/aide/aide.db 2>/dev/null | awk '{print $5" bytes"}')"
+if [ -s /var/lib/aide/aide.db ]; then
+  log "AIDE baseline OK: $(ls -l /var/lib/aide/aide.db | awk '{print $5" bytes"}')"
+else
+  log "AIDE BASELINE MISSING — do NOT ship this image (aide exit=$rc)"
+fi
 
 # ------------------------------------------------------------- free-space zero
 # THE size lever. ovftool compresses the disk, but unallocated blocks still hold

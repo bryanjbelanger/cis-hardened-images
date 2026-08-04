@@ -20,3 +20,9 @@ echo "[lock] expiring builder password (forces change at first login)"
 chage -d 0 builder 2>/dev/null
 echo "[lock] locking root — guest operations stop working now"
 passwd -l root >/dev/null 2>&1
+
+# Power off from here: builder's password just changed, so Packer's
+# shutdown_command (which sudo's with the build password) cannot work any more.
+# Detached so this provisioner returns before the machine goes down.
+echo "[lock] powering off"
+nohup sh -c 'sleep 3; systemctl poweroff' >/dev/null 2>&1 &

@@ -97,7 +97,8 @@ source "vmware-iso" "cis" {
   ssh_timeout            = "45m" # install + first boot
   ssh_handshake_attempts = 100   # CIS sshd rate-limits (MaxStartups)
 
-  shutdown_command = "echo '${var.ssh_password}' | sudo -S shutdown -P now"
+  # No shutdown_command: lock-accounts.sh powers the guest off itself, because
+  # by then the build password no longer works for sudo.
   shutdown_timeout = "20m"
   output_directory = "${var.output_dir}/${var.vm_name}-vmware"
   headless         = true
@@ -128,7 +129,6 @@ source "virtualbox-iso" "cis" {
   ssh_timeout            = "45m"
   ssh_handshake_attempts = 100
 
-  shutdown_command = "echo '${var.ssh_password}' | sudo -S shutdown -P now"
   shutdown_timeout = "20m"
   output_directory = "${var.output_dir}/${var.vm_name}-virtualbox"
   headless         = true
@@ -199,8 +199,12 @@ build {
     destination = "${var.output_dir}/${var.vm_name}-${source.type}-seal.log"
   }
 
+  # LAST provisioner. It changes builder's password, which breaks any later
+  # sudo using the build password — including Packer's own shutdown_command.
+  # So it powers the machine off itself, detached, and we expect the disconnect.
   provisioner "shell" {
-    execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
-    script          = "lock-accounts.sh"
+    execute_command   = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
+    script            = "lock-accounts.sh"
+    expect_disconnect = true
   }
 }
