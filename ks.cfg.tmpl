@@ -30,12 +30,15 @@ services --enabled=auditd,firewalld,chronyd,vmtoolsd
 @INSTALL_SRC@
 
 # CIS 1.3.1 / 4.1.1.x: auditing active from the first boot onward.
-# FIPS (optional, FIPS=yes in the target env) appends fips=1 here so the kernel
-# comes up in FIPS mode and keys/initramfs are generated under it from the
-# start — retrofitting with fips-mode-setup after install is supported but
-# leaves pre-FIPS key material behind. FIPS is orthogonal to CIS: cis_server_l1
-# does not require it; the DISA STIG profiles do.
-bootloader --append="audit=1 audit_backlog_limit=8192@FIPS_ARG@"
+# NOTE: fips=1 is deliberately NOT set here. With a separate /boot partition —
+# which the CIS layout below mandates — dracut's FIPS module also needs
+# boot=UUID=<uuid-of-/boot> to verify the kernel HMAC, and that UUID does not
+# exist until the installer creates the filesystem. Setting fips=1 alone makes
+# the installed system panic at boot (verified: the VM installs, then never
+# comes up or answers the network). FIPS is instead enabled in %post via
+# `fips-mode-setup --enable`, which installs dracut-fips, regenerates the
+# initramfs, and writes BOTH fips=1 and the correct boot=UUID= argument.
+bootloader --append="audit=1 audit_backlog_limit=8192"
 
 # CIS 1.1.x partition layout: separate filesystems with restrictive mount
 # options. L1 requires /tmp and /var/tmp separation; the rest is L2 but
@@ -83,7 +86,9 @@ firewalld
 %post --log=/root/ks-post.log
 # vmtoolsd is the MCP control channel (vmrun guest ops) — must survive boot.
 systemctl enable vmtoolsd auditd firewalld chronyd
+@FIPS_POST@
 @POST_HARDEN@
+@FIPS_POST2@
 
 # Site-policy and residual-fail fixes, applied AFTER remediation so they are
 # final. (%post runs in a chroot: `disable`/`mask` work via symlinks, `--now`

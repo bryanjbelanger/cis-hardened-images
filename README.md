@@ -90,11 +90,28 @@ installs, and is verified equivalent: rules that must hold before first boot
 kickstart rather than retrofitted, and all 21 of those rules pass on the built
 image.
 
-### FIPS mode (optional, off by default)
+### FIPS mode (optional, off by default) — verified on Rocky 9
 
-`FIPS=yes` appends `fips=1` to the kernel command line so the system comes up
-in FIPS mode with keys and initramfs generated under it — cleaner than
-retrofitting with `fips-mode-setup`, which leaves pre-FIPS key material behind.
+`FIPS=yes` enables FIPS 140 mode via `fips-mode-setup --enable` in `%post`.
+
+**It does NOT set `fips=1` on the bootloader line, and must not.** With a
+separate `/boot` — which the CIS partition layout mandates — dracut's FIPS
+module also needs `boot=UUID=<uuid>` to verify the kernel HMAC, and that UUID
+does not exist when the kickstart is authored. Setting `fips=1` alone produces
+a system that installs fine and then never boots (verified: no console login,
+no network, no VMware Tools). `fips-mode-setup` writes both arguments, pulls in
+the dracut FIPS support, and rebuilds the initramfs.
+
+**A second conflict, also handled:** CIS remediation installs a DEFAULT-based
+custom crypto policy that overwrites the FIPS policy, leaving
+`fips-mode-setup --check` reporting *"Inconsistent state detected"*. The
+template therefore re-applies the same CIS sub-policies on a FIPS base after
+remediation (`FIPS:NO-SHA1:NO-SSHCBC:...`), so both hold.
+
+Measured cost of FIPS: **none**. Rocky 9 with FIPS audits 274 pass / 2 fail /
+17 N/A — identical to the non-FIPS build, with all 21 partition/mount rules
+passing and MD5 correctly refused by OpenSSL.
+
 Set it per target in `targets/<name>.env` for a standing choice, or per render:
 
 ```

@@ -25,9 +25,28 @@ render_one() {
   # does not require it, and it breaks clients that only speak non-approved
   # algorithms.
   local fips_eff="${fips_cli:-${FIPS:-no}}"
+  # FIPS is enabled in %post with fips-mode-setup, NOT via a fips=1 bootloader
+  # arg: with a separate /boot (which the CIS layout mandates) dracut also needs
+  # boot=UUID=..., and that UUID does not exist at kickstart-authoring time.
+  # fips-mode-setup writes both, installs dracut-fips and rebuilds the initramfs.
   local fips_arg=""
+  local fips_post=""
+  local fips_post2=""
   if [[ $fips_eff == yes ]]; then
-    fips_arg=" fips=1"
+    fips_post="# FIPS 140 mode (FIPS=yes). fips-mode-setup handles dracut-fips, the
+# initramfs rebuild, and the fips=1 + boot=UUID= kernel arguments — the latter
+# is required because /boot is a separate filesystem, and omitting it makes the
+# installed system panic before networking comes up.
+fips-mode-setup --enable || echo 'WARNING: fips-mode-setup failed' >&2"
+    # CIS remediation sets a DEFAULT-based custom crypto policy, which overwrites
+    # the FIPS policy fips-mode-setup installed and leaves the system reporting
+    # "Inconsistent state detected". Re-apply the SAME CIS sub-policies on a FIPS
+    # base afterwards so both hold. Verified on Rocky 9.
+    fips_post2="# Reconcile crypto policy: CIS's custom policy is DEFAULT-based and clobbers
+# the FIPS policy set earlier in this %post. Layer the CIS sub-policies onto a
+# FIPS base instead, or FIPS reports an inconsistent state.
+update-crypto-policies --set FIPS:NO-SHA1:NO-SSHCBC:NO-SSHWEAKCIPHERS:NO-SSHWEAKMACS:NO-WEAKMAC:NO-RPMSHA1 \\
+  || update-crypto-policies --set FIPS"
   fi
 
   # Remediation runs in %post on EVERY target, EL9 included.
@@ -76,7 +95,7 @@ oscap xccdf eval --remediate \\
     local pw_hash
     pw_hash=$(PW_BUILDER="$PW_BUILDER" .venv/bin/python -c \
       "from passlib.hash import sha512_crypt;import os;print(sha512_crypt.hash(os.environ['PW_BUILDER']))")
-    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg ROOT_PW_V=$PW_ROOT_BUILD \
+    HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD \
     CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS STAGE_DS_V=$stage_ds \
     python3 - "$tgt" << 'PYEOF'
 import os, sys
@@ -99,7 +118,7 @@ PYEOF
   HOSTNAME_V=$HOSTNAME INSTALL_SRC_V=$INSTALL_SRC APPSTREAM_V=$APPSTREAM_URL \
   ROOT_PW_V=$PW_ROOT_BUILD BUILDER_PW_V=$PW_BUILDER \
   HARDEN_V=$harden_block POST_HARDEN_V=$post_harden BASEOS_V=$BASEOS_REPO \
-  FIPS_V=$fips_arg \
+  FIPS_V=$fips_arg FIPS_POST_V=$fips_post FIPS_POST2_V=$fips_post2 \
   python3 - "$tgt" << 'PYEOF'
 import os, sys
 tmpl = open("ks.cfg.tmpl").read()
@@ -107,7 +126,7 @@ for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@INSTALL_SRC@","INSTALL_SRC_V")
                    ("@APPSTREAM_URL@","APPSTREAM_V"),("@ROOT_PW@","ROOT_PW_V"),
                    ("@BUILDER_PW@","BUILDER_PW_V"),("@HARDEN_BLOCK@","HARDEN_V"),
                    ("@POST_HARDEN@","POST_HARDEN_V"),("@BASEOS_REPO@","BASEOS_V"),
-                   ("@FIPS_ARG@","FIPS_V")]:
+                   ("@FIPS_ARG@","FIPS_V"),("@FIPS_POST@","FIPS_POST_V"),("@FIPS_POST2@","FIPS_POST2_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
 out = f"build/{sys.argv[1]}/ks/ks.cfg"
 open(out, "w").write(tmpl)
