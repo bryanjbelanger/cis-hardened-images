@@ -75,6 +75,16 @@ variable "output_dir" {
 }
 
 locals {
+  # Artifact naming contract with consumers (the desktop-hypervisor-mcp image
+  # catalog resolves assets by EXACT name inside a release chosen by tag):
+  #   * NO date/version in the filename — that goes in the release tag, or
+  #     "latest" can never be resolved to a predictable asset.
+  #   * hypervisor family in the name — the images genuinely differ (guest
+  #     agent), so one release carries both and they must not collide.
+  #   * arch suffix so adding arm64 later changes nothing else.
+  artifact_vmware     = "cis-${var.target}-vmware-amd64.ova"
+  artifact_virtualbox = "cis-${var.target}-virtualbox-amd64.ova"
+
   # render.sh writes the kickstart here; Packer turns the directory into the
   # OEMDRV ISO itself, so make_iso is no longer needed for EL targets.
   ks_dir = "build/${var.target}${var.render_suffix}/ks"
@@ -223,13 +233,24 @@ build {
     expect_disconnect = true
   }
 
+  post-processor "shell-local" {
+    only = ["virtualbox-iso.cis"]
+    inline = [
+      "SRC='${var.output_dir}/${var.vm_name}-virtualbox/${var.vm_name}.ova'",
+      "OUT='${var.output_dir}/${local.artifact_virtualbox}'",
+      "mv -f \"$SRC\" \"$OUT\"",
+      "shasum -a 256 \"$OUT\" > \"$OUT.sha256\"",
+      "ls -lh \"$OUT\" | awk '{print \"OVA: \" $5}'",
+    ]
+  }
+
   # vmware-iso produces a vmx+vmdk directory; the shippable artifact is an OVA.
   # ovftool ships with Fusion. (virtualbox-iso already emits format = "ova".)
   post-processor "shell-local" {
     only = ["vmware-iso.cis"]
     inline = [
       "OVFTOOL='/Applications/VMware Fusion.app/Contents/Library/VMware OVF Tool/ovftool'",
-      "OUT='${var.output_dir}/${var.vm_name}.ova'",
+      "OUT='${var.output_dir}/${local.artifact_vmware}'",
       "rm -f \"$OUT\"",
       "\"$OVFTOOL\" --lax --allowExtraConfig --compress=9 '${var.output_dir}/${var.vm_name}-vmware/${var.vm_name}.vmx' \"$OUT\"",
       "shasum -a 256 \"$OUT\" > \"$OUT.sha256\"",

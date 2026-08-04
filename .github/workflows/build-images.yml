@@ -110,7 +110,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          TAG="images-$(date +%Y%m%d)"
+          # Date lives in the TAG so asset names stay stable and resolvable
+          # from "latest". Consumers (the desktop-hypervisor-mcp image catalog)
+          # select a release by tag, then match asset names EXACTLY.
+          TAG="v$(date +%Y.%m.%d)"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Hardened images $(date +%Y-%m-%d)" \
             --notes "CIS-hardened images. See README for first-login steps and accepted exceptions."

@@ -14,8 +14,11 @@ you can see exactly which rules pass, which fail, and why.
 ### 1. Verify what you downloaded
 
 ```bash
-shasum -a 256 -c cis-<target>-<date>.ova.sha256
+shasum -a 256 -c cis-<target>-<hypervisor>-amd64.ova.sha256
 ```
+
+GitHub also publishes its own SHA-256 digest for every release asset, so
+automated consumers can verify without the sidecar file.
 
 ### 2. Import
 
@@ -80,6 +83,28 @@ FIPS images also refuse MD5, SHA-1 signatures and older SSH ciphers, which
 breaks older clients — take them only if you need them.
 
 ---
+
+## Release and asset naming (contract for automated consumers)
+
+Stable, predictable names — tooling resolves assets by exact name:
+
+```
+release tag:  v2026.08.04              <- the date lives HERE
+assets:       cis-rocky9-vmware-amd64.ova
+              cis-rocky9-vmware-amd64.ova.sha256
+              cis-rocky9-virtualbox-amd64.ova
+              cis-rocky9-virtualbox-amd64.ova.sha256
+```
+
+Three rules, and they exist for a reason:
+
+1. **No date or version in the filename.** Consumers pick a release by tag
+   (often `latest`) and then match the asset name exactly. A date-stamped
+   filename cannot be predicted from `latest`.
+2. **Hypervisor family in the name.** VMware and VirtualBox images genuinely
+   differ (guest agent), so one release carries both and they must not collide.
+3. **Architecture suffix.** Adding `arm64` builds later then changes nothing
+   else about resolution.
 
 ## Honest limitations
 
