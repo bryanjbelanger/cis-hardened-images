@@ -5,6 +5,12 @@ name: Build hardened images
 # a Kubernetes pod (which is also why the ARC runners in the cluster cannot serve
 # this repo).
 on:
+  workflow_call:
+    inputs:
+      target:      { required: true,  type: string }
+      hypervisor:  { required: true,  type: string }
+      fips:        { required: false, type: string, default: "no" }
+      publish:     { required: false, type: string, default: "no" }
   workflow_dispatch:
     inputs:
       target:
@@ -30,15 +36,15 @@ on:
         type: choice
         options: ["no", "yes"]
   schedule:
-    # Monthly rebuild for CVE currency. Each image is ~60-75 min end to end and
-    # the Mac runs one at a time, so a full matrix is an overnight job — keep
-    # this to a single canary and drive full rebuilds with workflow_dispatch.
+    # Monthly canary for CVE currency. Full-matrix rebuilds go through
+    # build-matrix.yml, which fans out across the runner pool.
     - cron: "0 7 1 * *"
 
-# One build at a time: each needs the hypervisor, ~25GB scratch and exclusive
-# use of the VM name.
+# Scoped per image, NOT global: different target/hypervisor/fips combinations
+# build in parallel across the runner pool. The key is the VM name — two runs
+# of the SAME combination would fight over one VM, so that is what we serialize.
 concurrency:
-  group: hardened-image-build
+  group: image-${{ inputs.target || 'rocky9' }}-${{ inputs.hypervisor || 'fusion' }}-${{ inputs.fips || 'no' }}
   cancel-in-progress: false
 
 permissions:

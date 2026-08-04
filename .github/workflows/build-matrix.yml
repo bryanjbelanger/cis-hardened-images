@@ -1,0 +1,50 @@
+name: Rebuild image matrix
+
+# Full rebuild across every supported image. Fans out over the pool of
+# self-hosted macOS runners (4 registered), so wall-clock is roughly
+# ceil(images / 4) * ~70min instead of images * ~70min.
+on:
+  workflow_dispatch:
+    inputs:
+      max_parallel:
+        description: "Concurrent builds (host has 64GB RAM / 8 physical cores; 4 fits comfortably at 4GB+2vCPU each)"
+        required: false
+        default: "4"
+      publish:
+        description: "Attach OVAs to a GitHub release"
+        required: false
+        default: "no"
+        type: choice
+        options: ["no", "yes"]
+
+permissions:
+  contents: write
+
+jobs:
+  matrix:
+    strategy:
+      # Never cancel siblings: a failure in one image must not discard three
+      # other 70-minute builds that are already most of the way through.
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - { target: rocky9,     hypervisor: fusion,     fips: "no"  }
+          - { target: rocky9,     hypervisor: virtualbox, fips: "no"  }
+          - { target: rocky9,     hypervisor: fusion,     fips: "yes" }
+          - { target: rocky9,     hypervisor: virtualbox, fips: "yes" }
+          - { target: rocky10,    hypervisor: fusion,     fips: "no"  }
+          - { target: rocky10,    hypervisor: virtualbox, fips: "no"  }
+          - { target: rocky10,    hypervisor: fusion,     fips: "yes" }
+          - { target: rocky10,    hypervisor: virtualbox, fips: "yes" }
+          # FIPS is EL-only: Ubuntu's certified modules come through Ubuntu Pro,
+          # whose redistribution terms are unresolved for a public image.
+          - { target: ubuntu2404, hypervisor: fusion,     fips: "no"  }
+          - { target: ubuntu2404, hypervisor: virtualbox, fips: "no"  }
+    uses: ./.github/workflows/build-images.yml
+    with:
+      target: ${{ matrix.target }}
+      hypervisor: ${{ matrix.hypervisor }}
+      fips: ${{ matrix.fips }}
+      publish: ${{ inputs.publish }}
+    secrets: inherit
