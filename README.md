@@ -1,9 +1,101 @@
-# cis-rocky-ova
+# CIS-hardened Linux images
 
-Builds **CIS Server Level 1 hardened OVAs** for the Fedora-family EL
-distributions from clean ISOs, fully unattended, driven end-to-end through MCP
-servers (VMware Fusion for the hypervisor, checksum-verified downloads via the
-virtualbox server's tooling).
+Ready-to-run virtual machine images hardened to the **CIS Level 1 Server**
+benchmark, built unattended and audited with OpenSCAP. Available for **VMware**
+(Fusion, and Workstation on Windows or Linux) and **VirtualBox**.
+
+Every image ships with the audit report that produced its published score, so
+you can see exactly which rules pass, which fail, and why.
+
+---
+
+## Using an image
+
+### 1. Verify what you downloaded
+
+```bash
+shasum -a 256 -c cis-<target>-<date>.ova.sha256
+```
+
+### 2. Import
+
+- **VMware Fusion / Workstation** — File → Import, select the `.ova`
+- **VirtualBox** — File → Import Appliance, select the `.ova`
+
+### 3. First login
+
+| | |
+|---|---|
+| Username | `builder` |
+| Password | `cis-hardened` |
+| root | **locked** — use `sudo` |
+
+**The password is expired on purpose.** You are forced to change it at first
+login. This is a public image; that default is known to everyone until you
+change it, so change it before putting the VM on a network you care about.
+
+SSH is restricted to the `wheel` group (EL) or `sudo` group (Ubuntu) — add your
+own accounts to that group, or edit `/etc/ssh/sshd_config.d/49-cis-access.conf`.
+
+### 4. Do these before production use
+
+The benchmark cannot be fully satisfied by an image alone. These are yours:
+
+1. **Change the password** (forced at first login, but do not stop there — add
+   an SSH key and consider disabling password auth).
+2. **Set a bootloader password** — `grub2-setpassword` on EL. Shipped images
+   deliberately have none; see the exceptions table below.
+3. **Point logs somewhere** — configure `/etc/systemd/journal-upload.conf` if
+   your policy requires remote logging.
+4. **Re-run the audit yourself** after your changes:
+   ```bash
+   sudo oscap xccdf eval --profile <profile> --report ~/report.html \
+     /usr/share/xml/scap/ssg/content/<datastream>
+   ```
+   The profile and datastream for each image are listed in its release notes.
+
+---
+
+## What is in the image
+
+- **CIS Level 1 Server** hardening, applied with the OpenSCAP `scap-security-guide`
+  content — the same open-source policy Red Hat ships and CIS-adjacent tooling
+  uses. Nothing is hand-rolled.
+- **CIS partition layout**: separate `/home`, `/tmp`, `/var`, `/var/tmp`,
+  `/var/log`, `/var/log/audit` with `nodev,nosuid,noexec` as the benchmark
+  requires.
+- **auditd** enabled from first boot, **AIDE** file-integrity baseline built
+  against the shipped state, **SELinux enforcing** (EL) / **AppArmor enforcing**
+  (Ubuntu).
+- Minimal package set plus the guest agent for its hypervisor.
+- **No machine-id and no SSH host keys** — both regenerate on first boot, so
+  cloned VMs do not share an identity.
+
+### Optional FIPS builds
+
+FIPS variants (EL only) boot with FIPS 140 mode enabled and a FIPS-based crypto
+policy. Note that running in FIPS mode is **not** the same as being
+FIPS-*certified*: certification attaches to specific validated module builds.
+FIPS images also refuse MD5, SHA-1 signatures and older SSH ciphers, which
+breaks older clients — take them only if you need them.
+
+---
+
+## Honest limitations
+
+- **These images are not certified.** They are hardened against a published
+  benchmark and audited with the standard scanner. That is evidence, not
+  accreditation.
+- **Two rules never pass**, by design — see the exceptions table below. Both are
+  bootloader-password rules that only you can satisfy sensibly.
+- **CIS Benchmark documents themselves are not redistributed here.** Rule
+  identifiers and results are reported; the benchmark text belongs to CIS.
+
+---
+
+# Building the images
+
+*Everything below is for maintaining the pipeline, not for using an image.*
 
 ## Supported targets
 

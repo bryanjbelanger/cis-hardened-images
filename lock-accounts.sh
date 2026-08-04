@@ -6,6 +6,16 @@
 #
 # Run only after seal.sh's log has been retrieved and checked.
 set -u
+# PUBLISHED DEFAULT PASSWORD.
+# The build password lives in local-creds.env and is never published, so leaving
+# it in place would ship an image nobody can log into: root is locked below and
+# builder's password would be both unknown and expired. Set a documented default
+# instead, expired immediately so the first login MUST change it. This is the
+# same model Vagrant boxes use.
+: "${DEFAULT_PASSWORD:=cis-hardened}"
+echo "[lock] setting documented default password for builder"
+echo "builder:${DEFAULT_PASSWORD}" | chpasswd
+
 echo "[lock] expiring builder password (forces change at first login)"
 chage -d 0 builder 2>/dev/null
 echo "[lock] locking root — guest operations stop working now"

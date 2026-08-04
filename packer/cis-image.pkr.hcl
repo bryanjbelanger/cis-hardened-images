@@ -195,7 +195,7 @@ build {
 
   provisioner "file" {
     direction   = "download"
-    source      = "/root/seal.log"
+    source      = "/tmp/seal.log"
     destination = "${var.output_dir}/${var.vm_name}-${source.type}-seal.log"
   }
 

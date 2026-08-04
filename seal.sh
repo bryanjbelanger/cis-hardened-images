@@ -14,7 +14,14 @@ set -u
 # is checked explicitly instead.
 set +e
 
-log() { echo "[seal] $*"; }
+# The seal log is the artifact the pipeline VERIFIES before locking accounts,
+# so it must be retrievable by the unprivileged build user: /root is 0700 and
+# Packer's file provisioner downloads as the SSH user, not root. Write it to
+# /tmp with world-read, and still echo to stdout for the MCP flow.
+SEAL_LOG=${SEAL_LOG:-/tmp/seal.log}
+: > "$SEAL_LOG" 2>/dev/null || true
+chmod 0644 "$SEAL_LOG" 2>/dev/null || true
+log() { echo "[seal] $*" | tee -a "$SEAL_LOG"; }
 
 # ---------------------------------------------------------------- build residue
 # These contain the build password in plaintext. They are not secrets by policy
