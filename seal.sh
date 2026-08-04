@@ -103,8 +103,12 @@ if command -v aide >/dev/null 2>&1; then
 else
   log "WARNING: aide not installed — no integrity baseline"
 fi
-if [ -s /var/lib/aide/aide.db ]; then
-  log "AIDE baseline OK: $(ls -l /var/lib/aide/aide.db | awk '{print $5" bytes"}')"
+AIDE_DB=""
+for d in /var/lib/aide/aide.db.gz /var/lib/aide/aide.db; do
+  [ -s "$d" ] && { AIDE_DB="$d"; break; }
+done
+if [ -n "$AIDE_DB" ]; then
+  log "AIDE baseline OK: $AIDE_DB ($(ls -l "$AIDE_DB" | awk '{print $5}') bytes)"
 else
   log "AIDE BASELINE MISSING — do NOT ship this image (aide exit=$rc)"
 fi

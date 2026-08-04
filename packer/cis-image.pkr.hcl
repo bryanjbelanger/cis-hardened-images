@@ -207,4 +207,18 @@ build {
     script            = "lock-accounts.sh"
     expect_disconnect = true
   }
+
+  # vmware-iso produces a vmx+vmdk directory; the shippable artifact is an OVA.
+  # ovftool ships with Fusion. (virtualbox-iso already emits format = "ova".)
+  post-processor "shell-local" {
+    only = ["vmware-iso.cis"]
+    inline = [
+      "OVFTOOL='/Applications/VMware Fusion.app/Contents/Library/VMware OVF Tool/ovftool'",
+      "OUT='${var.output_dir}/${var.vm_name}.ova'",
+      "rm -f \"$OUT\"",
+      "\"$OVFTOOL\" --lax --allowExtraConfig --compress=9 '${var.output_dir}/${var.vm_name}-vmware/${var.vm_name}.vmx' \"$OUT\"",
+      "shasum -a 256 \"$OUT\" > \"$OUT.sha256\"",
+      "ls -lh \"$OUT\" | awk '{print \"OVA: \" $5}'",
+    ]
+  }
 }
