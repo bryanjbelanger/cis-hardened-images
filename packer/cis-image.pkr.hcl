@@ -144,29 +144,30 @@ source "virtualbox-iso" "cis" {
   memory               = var.memory_mb
   disk_size            = var.disk_size_mb
   hard_drive_interface = "sata"
-  # BIOS, deliberately — VMware uses EFI, this does not, and the images are
-  # equivalent either way because the kickstart's `reqpart --add-boot` lets
-  # Anaconda create whatever the platform needs (an ESP under EFI, a biosboot
-  # partition under BIOS). Nothing in the CIS layout depends on the firmware.
+  # VRAM. This is the setting that actually mattered. The plugin creates the VM
+  # with 4MB, and the Rocky installer hung dead at the same point in EVERY
+  # configuration tried — EFI and BIOS, media on SATA and on IDE, e1000 and
+  # virtio — roughly 8s into the kernel, no console output and no disk I/O for
+  # ten minutes, never reaching Anaconda.
   #
-  # EFI here was a dead end, and it cost two failed builds to establish why.
-  # Upstream attaches ISOs to high SATA ports (13/15) that VirtualBox's EFI
-  # firmware will not boot from; the patched plugin
-  # (bryanjbelanger/packer-plugin-virtualbox, fix/efi-sata-iso-ports, upstream
-  # refs #39 and #20) correctly moves them to port 1, and VBoxManage confirms
-  # the ISO lands there — but the firmware STILL does not boot it. VBox.log
-  # shows the AHCI ports being probed, then `NAT: Link up`: EFI finds nothing
-  # bootable and falls through to network boot. The port fix is necessary but
-  # not sufficient, and the remaining fault is in VirtualBox's EFI itself.
+  # Isolated by building a VM by hand with the same disk, media and NIC but
+  # 16MB of VRAM: the installer started immediately, printing "X or window
+  # manager startup failed, falling back to text mode". Anaconda attempts a
+  # graphical install first, and on a 4MB VMSVGA framebuffer that attempt wedges
+  # the guest instead of falling back.
   #
-  # ISOs on IDE, which is the plugin's own default and the most compatible path
-  # on VirtualBox. `iso_interface = "sata"` was only ever set to work around the
-  # EFI port bug, and it caused its own failure: under BIOS the installer kernel
-  # booted, initialised AHCI, probed the DVDs on ports 13/15 — and then froze
-  # dead, ~9s into the kernel, with zero further console output or disk I/O for
-  # ten minutes. Not host oversubscription (load 3 on 16 cores, no other VMs).
-  # With EFI abandoned there is no reason to keep the guest on AHCI for its
-  # installer media.
+  # Three earlier hypotheses were wrong and are recorded so they are not retried:
+  # VirtualBox's EFI firmware refusing to boot (it boots; PR #192's port fix is
+  # confirmed correct by VBoxManage showing the ISO on port 1), the SATA/AHCI
+  # media interface, and the e1000 NIC (the hand-built VM used e1000 and worked).
+  gfx_vram_size = 32
+
+  # BIOS — VMware uses EFI, this does not, and the images are equivalent either
+  # way because the kickstart's `reqpart --add-boot` lets Anaconda create
+  # whatever the platform needs (an ESP under EFI, a biosboot partition under
+  # BIOS). Nothing in the CIS layout depends on the firmware. EFI would very
+  # likely work too now that VRAM is fixed, but BIOS is what has been verified
+  # end to end here and needs no patched plugin.
   firmware = "bios"
 
   cd_files = ["${local.ks_dir}/"]
