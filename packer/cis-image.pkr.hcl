@@ -223,8 +223,16 @@ build {
     expect_disconnect = true
   }
 
+  # Site policy AFTER the reboot (apparmor enforce needs the new kernel args)
+  # and BEFORE the second remediation, so that pass and the final audit both
+  # see it. Without this an Ubuntu build scores 357/5 instead of 360/2.
   provisioner "shell" {
     pause_before    = "45s"
+    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
+    script          = "site-policy.sh"
+  }
+
+  provisioner "shell" {
     execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
     inline = [
       "oscap xccdf eval --remediate --profile ${var.cis_profile} --report /root/remediation2.html /usr/share/xml/scap/ssg/content/${var.ssg_ds} || [ $? -eq 2 ]",
