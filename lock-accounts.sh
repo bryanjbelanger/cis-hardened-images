@@ -19,10 +19,33 @@ set +e
 # same model Vagrant boxes use.
 : "${DEFAULT_PASSWORD:=cis-hardened}"
 echo "[lock] setting documented default password for builder"
-if ! echo "builder:${DEFAULT_PASSWORD}" | chpasswd; then
+# Set it as a PRE-HASHED value. Plain `chpasswd` runs the password through PAM,
+# and by this point CIS remediation has enabled pwquality — which rejects the
+# documented default and left the image with NO usable credentials. Hashing here
+# bypasses the quality check deliberately: the password is public by design and
+# force-expired below, so its strength is irrelevant; being able to log in at
+# all is not.
+_hash=""
+if command -v openssl >/dev/null 2>&1; then
+  _hash=$(openssl passwd -6 "${DEFAULT_PASSWORD}" 2>/dev/null)
+fi
+if [ -z "$_hash" ] && command -v mkpasswd >/dev/null 2>&1; then
+  _hash=$(mkpasswd -m sha-512 "${DEFAULT_PASSWORD}" 2>/dev/null)
+fi
+if [ -z "$_hash" ]; then
+  echo "[lock] ERROR: no way to hash the default password (need openssl or mkpasswd)" >&2
+  exit 1
+fi
+if ! usermod -p "$_hash" builder; then
   echo "[lock] ERROR: could not set the default password — image would be unusable" >&2
   exit 1
 fi
+# Prove it took: an empty or '!'-prefixed field would mean no login is possible.
+_field=$(getent shadow builder | cut -d: -f2)
+case "$_field" in
+  '$6$'*) echo "[lock] default password set (sha512)" ;;
+  *) echo "[lock] ERROR: builder password field is '${_field:0:3}...' — not a usable hash" >&2; exit 1 ;;
+esac
 
 echo "[lock] expiring builder password (forces change at first login)"
 chage -d 0 builder 2>/dev/null || echo "[lock] warning: chage failed (password not pre-expired)"
