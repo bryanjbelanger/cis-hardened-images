@@ -239,7 +239,7 @@ build {
       "SRC='${var.output_dir}/${var.vm_name}-virtualbox/${var.vm_name}.ova'",
       "OUT='${var.output_dir}/${local.artifact_virtualbox}'",
       "mv -f \"$SRC\" \"$OUT\"",
-      "shasum -a 256 \"$OUT\" > \"$OUT.sha256\"",
+      "(cd \"$(dirname \"$OUT\")\" && shasum -a 256 \"$(basename \"$OUT\")\" > \"$(basename \"$OUT\").sha256\")",
       "ls -lh \"$OUT\" | awk '{print \"OVA: \" $5}'",
     ]
   }
@@ -253,7 +253,7 @@ build {
       "OUT='${var.output_dir}/${local.artifact_vmware}'",
       "rm -f \"$OUT\"",
       "\"$OVFTOOL\" --lax --allowExtraConfig --compress=9 '${var.output_dir}/${var.vm_name}-vmware/${var.vm_name}.vmx' \"$OUT\"",
-      "shasum -a 256 \"$OUT\" > \"$OUT.sha256\"",
+      "(cd \"$(dirname \"$OUT\")\" && shasum -a 256 \"$(basename \"$OUT\")\" > \"$(basename \"$OUT\").sha256\")",
       "ls -lh \"$OUT\" | awk '{print \"OVA: \" $5}'",
     ]
   }
