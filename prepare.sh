@@ -36,6 +36,27 @@ if command -v apt-get >/dev/null 2>&1; then
   apt-get install -y -qq libpam-pwquality auditd aide chrony
   log "toolchain: oscap=$(command -v oscap || echo MISSING) aide=$(command -v aide || echo MISSING)"
 
+  # VirtualBox guest agent, here for exactly the same reason as the toolchain
+  # above: virtualbox-guest-utils is in universe, and Subiquity's install-time
+  # sources are the ISO alone, so requesting it in autoinstall `packages:`
+  # aborts the install with apt exit status 100. Post-boot, apt has real
+  # sources and it installs normally.
+  #
+  # Detected from DMI rather than passed in, so this stays correct however the
+  # build is driven. EL cannot use this path at all — there is no packaged
+  # Guest Additions on EL and Oracle's ISO will not build against RHEL 9.8
+  # (see README).
+  if grep -qi virtualbox /sys/class/dmi/id/product_name 2>/dev/null \
+     || grep -qi virtualbox /sys/class/dmi/id/sys_vendor 2>/dev/null; then
+    log "VirtualBox guest detected — installing virtualbox-guest-utils"
+    if apt-get install -y -qq virtualbox-guest-utils 2>/dev/null; then
+      systemctl enable virtualbox-guest-utils >/dev/null 2>&1
+      log "guest agent: $(command -v VBoxService || echo 'VBoxService MISSING')"
+    else
+      log "WARNING: virtualbox-guest-utils failed to install — guestcontrol will not work"
+    fi
+  fi
+
   # Ubuntu's packaged SCAP content does not always carry the datastream for the
   # release you are building (24.04's ssg-debderived shipped 16.04-22.04 only),
   # so the build stages a verified copy at /root/ instead of trusting the repo.

@@ -91,8 +91,7 @@ autoinstall:
   # lives in universe and is installed POST-BOOT via MCP guest ops, where apt
   # has real network sources and every command's output is observable. See
   # skills/cis-ova-build (Phase 3) for that step.
-  packages:
-    - @GUEST_PKGS@
+  packages:@GUEST_PKGS@
 
   # CIS 1.3.1 / 4.1.1.x: auditing active from first boot. FIPS (fips=1) is
   # appended by render.sh when the target opts in.

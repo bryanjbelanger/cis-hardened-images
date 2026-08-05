@@ -32,10 +32,13 @@ render_one() {
   # point of these builds. Extend this case for new hypervisors; nothing else
   # in the template is hypervisor-specific.
   #
-  # EL note: virtualbox-guest-additions lives in EPEL, so that target also pulls
-  # the EPEL repo in at install time. RHEL-family kernels strip the in-tree
-  # vboxguest/vboxsf modules (verified absent on Rocky 9), so the package is
-  # genuinely required — it is not just userspace.
+  # VirtualBox note: neither family gets its agent at install time any more.
+  # EL cannot have one at all (no packaged Guest Additions, and Oracle's ISO
+  # will not build against RHEL 9.8); Ubuntu gets virtualbox-guest-utils
+  # post-boot from prepare.sh, because it lives in universe and Subiquity
+  # installs `packages:` from the ISO alone. RHEL-family kernels do strip the
+  # in-tree vboxguest/vboxsf modules — verified absent on Rocky 9 — so there is
+  # no fallback there either. See README and TROUBLESHOOTING.md.
   local guest_pkgs guest_svcs guest_repo=""
   case "${HYPERVISOR:-vmware}" in
     vmware)
@@ -55,8 +58,14 @@ render_one() {
       # No service is enabled here: the vboxadd units do not exist until the
       # ISO installer has run, and naming them now would fail the kickstart.
       if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
-        # Debian/Ubuntu DO package it (universe), so they get a working agent.
-        guest_pkgs="virtualbox-guest-utils"; guest_svcs="virtualbox-guest-utils"
+        # Debian/Ubuntu DO package it — but in UNIVERSE, and Subiquity installs
+        # `packages:` from the ISO's own repo alone
+        # (deb file:///cdrom <suite> main restricted). A universe package there
+        # aborts the whole install with apt exit status 100:
+        #   curtin ... 'virtualbox-guest-utils'] returned non-zero exit status 100
+        # Same reason the SCAP toolchain lives in prepare.sh. The agent is
+        # installed post-boot there instead, where apt has real sources.
+        guest_pkgs=""; guest_svcs=""
       else
         # EL gets NOTHING. Building from Oracle's ISO was tried and does not
         # work: the source fails to compile against RHEL 9.8's kernel
@@ -73,6 +82,18 @@ render_one() {
     *)
       echo "unknown HYPERVISOR: ${HYPERVISOR} (vmware|virtualbox|qemu|hyperv)" >&2; return 1 ;;
   esac
+  # The autoinstall `packages:` block is emitted WHOLE, because an empty value
+  # in a "- item" line renders as a bare "- " — a null list entry, not an empty
+  # list. VirtualBox/Ubuntu now has no install-time packages (its agent goes in
+  # post-boot), so that case is real.
+  local guest_pkgs_yaml=" []"
+  if [[ -n $guest_pkgs ]]; then
+    guest_pkgs_yaml=""
+    while IFS= read -r _p; do
+      [[ -n $_p ]] && guest_pkgs_yaml+=$'\n    - '"$_p"
+    done <<< "$guest_pkgs"
+  fi
+
   # Carries its OWN leading comma so an empty value cannot leave a trailing one
   # in `services --enabled=...`, which VirtualBox targets now produce (their
   # guest agent is installed after first boot, not by the kickstart).
@@ -158,7 +179,7 @@ oscap xccdf eval --remediate \\
     local pw_hash
     pw_hash=$(PW_BUILDER="$PW_BUILDER" .venv/bin/python -c \
       "from passlib.hash import sha512_crypt;import os;print(sha512_crypt.hash(os.environ['PW_BUILDER']))")
-    OUTDIR_V=$outdir AUTOINSTALL_SHUTDOWN_V=$autoinstall_shutdown HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs \
+    OUTDIR_V=$outdir AUTOINSTALL_SHUTDOWN_V=$autoinstall_shutdown HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs_yaml \
     CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS STAGE_DS_V=$stage_ds \
     python3 - "$tgt" << 'PYEOF'
 import os, sys
