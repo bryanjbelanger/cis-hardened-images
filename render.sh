@@ -41,14 +41,26 @@ render_one() {
     vmware)
       guest_pkgs="open-vm-tools"; guest_svcs="vmtoolsd" ;;
     virtualbox)
-      # Package name differs by family: EL uses virtualbox-guest-additions
-      # (EPEL), Debian/Ubuntu use virtualbox-guest-utils (universe, no EPEL).
+      # EL has NO packaged Guest Additions. This previously requested
+      # "virtualbox-guest-additions" from EPEL; that package does not exist
+      # there (EPEL 9 ships nothing named virtualbox at all), so Anaconda
+      # stopped at an interactive "missing packages ... ignore?" prompt that no
+      # automated build can answer. Guest Additions are instead built from
+      # Oracle's ISO by install-guest-additions.sh after first boot.
+      #
+      # What the kickstart installs here is only the toolchain that build
+      # needs. install-guest-additions.sh removes it again once the modules are
+      # built, so the shipped image carries no compiler.
+      #
+      # No service is enabled here: the vboxadd units do not exist until the
+      # ISO installer has run, and naming them now would fail the kickstart.
       if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
+        # Debian/Ubuntu DO package it (universe).
         guest_pkgs="virtualbox-guest-utils"; guest_svcs="virtualbox-guest-utils"
       else
-        guest_pkgs="virtualbox-guest-additions"; guest_svcs="vboxservice"
-      fi
-      guest_repo="repo --name=epel --baseurl=https://dl.fedoraproject.org/pub/epel/${EL_MAJOR:-9}/Everything/x86_64/" ;;
+        guest_pkgs=$'gcc\nmake\nperl\nbzip2\ntar\nkernel-devel\nelfutils-libelf-devel'
+        guest_svcs=""
+      fi ;;
     qemu|kvm)
       guest_pkgs="qemu-guest-agent"; guest_svcs="qemu-guest-agent" ;;
     hyperv)
@@ -56,7 +68,11 @@ render_one() {
     *)
       echo "unknown HYPERVISOR: ${HYPERVISOR} (vmware|virtualbox|qemu|hyperv)" >&2; return 1 ;;
   esac
-  local guest_svcs_csv="${guest_svcs// /,}"
+  # Carries its OWN leading comma so an empty value cannot leave a trailing one
+  # in `services --enabled=...`, which VirtualBox targets now produce (their
+  # guest agent is installed after first boot, not by the kickstart).
+  local guest_svcs_csv=""
+  [[ -n $guest_svcs ]] && guest_svcs_csv=",${guest_svcs// /,}"
 
   # DRIVER=packer renders a kickstart that reboots into the installed system
   # (Packer provisions over SSH); anything else powers off for the MCP flow.

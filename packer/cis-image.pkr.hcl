@@ -174,12 +174,17 @@ source "virtualbox-iso" "cis" {
   cd_files = ["${local.ks_dir}/"]
   cd_label = var.cd_label
 
-  # Do NOT attach/upload Oracle's Guest Additions ISO — the image installs the
-  # EPEL virtualbox-guest-additions package in the kickstart instead (service
-  # vboxservice, mirroring open-vm-tools/vmtoolsd on VMware). The distro package
-  # ships prebuilt modules, so no compiler toolchain lands in the image. This
-  # setting concerns the build only; the shipped guest DOES have the agent.
-  guest_additions_mode = "disable"
+  # Upload Oracle's Guest Additions ISO into the guest; install-guest-additions.sh
+  # builds and installs it after first boot. This is the ONLY real source on EL —
+  # there is no packaged Guest Additions, and EPEL 9 ships nothing named
+  # virtualbox at all. Requesting one in the kickstart left Anaconda at an
+  # interactive "missing packages ... ignore?" prompt that no automated build can
+  # answer.
+  #
+  # Guest Additions are what `VBoxManage guestcontrol` talks to, so this is the
+  # VirtualBox counterpart of open-vm-tools on the VMware images.
+  guest_additions_mode = "upload"
+  guest_additions_path = "/tmp/VBoxGuestAdditions.iso"
 
   # EFI + VirtualBox will not boot the installer unless the DVD is explicitly
   # first in the boot order — the VM sat at a black screen for 35 minutes with
@@ -220,6 +225,16 @@ build {
   provisioner "shell" {
     execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
     script          = "prepare.sh"
+  }
+
+  # VirtualBox only, and BEFORE remediation: the modules must be built while the
+  # build toolchain is still installed, and the reboot in the middle of the
+  # hardening chain then brings them up cleanly. The script removes the compiler
+  # again once the modules exist.
+  provisioner "shell" {
+    only            = ["virtualbox-iso.cis"]
+    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
+    script          = "install-guest-additions.sh"
   }
 
   # Everything below runs as root inside the installed system. It mirrors the

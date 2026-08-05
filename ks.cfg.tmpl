@@ -22,7 +22,7 @@ network --bootproto=dhcp --device=link --activate --hostname=@HOSTNAME@
 firstboot --disable
 selinux --enforcing
 firewall --enabled --ssh
-services --enabled=auditd,firewalld,chronyd,@GUEST_SVCS_CSV@
+services --enabled=auditd,firewalld,chronyd@GUEST_SVCS_CSV@
 
 # Install source: `cdrom` for minimal/dvd ISOs (BaseOS on the media);
 # CentOS Stream boot ISOs carry no packages, so their targets use
