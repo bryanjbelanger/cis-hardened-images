@@ -246,7 +246,8 @@ build {
     inline = [
       "oscap xccdf eval --profile ${var.cis_profile} --report /root/cis-report.html --results-arf /root/cis-arf.xml /usr/share/xml/scap/ssg/content/${var.ssg_ds} > /root/audit.txt 2>&1 || true",
       "{ echo pass=$(grep '^Result' /root/audit.txt | grep -c pass); echo fail=$(grep '^Result' /root/audit.txt | grep -c fail); echo total=$(grep -c '^Rule' /root/audit.txt); echo mount_rules_passing=$(grep -A1 -E 'partition_for|mount_option' /root/audit.txt | grep '^Result' | grep -c pass); echo FAILURES:; grep -B1 '^Result.*fail' /root/audit.txt | grep '^Rule' | sed 's/.*content_rule_//'; } > /tmp/audit-summary.txt",
-      "chmod a+r /tmp/audit-summary.txt /root/cis-report.html",
+      "cp /root/cis-report.html /tmp/cis-report.html",
+      "chmod a+r /tmp/audit-summary.txt /tmp/cis-report.html",
     ]
   }
 
@@ -256,12 +257,26 @@ build {
     destination = "${var.output_dir}/${var.vm_name}-${source.type}-audit.txt"
   }
 
+  # The full report, not just the counts. Sealing locks root and the VM is
+  # destroyed on success, so a failure that is not explained here can only be
+  # explained by rebuilding — which is how a rule failing on one distro but not
+  # its sibling stayed unexplained through an entire release cycle.
+  provisioner "file" {
+    direction   = "download"
+    source      = "/tmp/cis-report.html"
+    destination = "${var.output_dir}/${var.vm_name}-${source.type}-report.html"
+  }
+
   # Seal, then verify its log, then lock — deliberately three steps. Merging
   # seal and lock once hid a silently-failed AIDE baseline.
   provisioner "shell" {
-    # sudo -E: without it sudo strips the environment and every SCAP field in
-    # /etc/cis-image-release came out "unknown".
-    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash -eux '{{.Path}}'"
+    # {{.Vars}} is REQUIRED here. Packer substitutes environment_vars only where
+    # that placeholder appears; overriding execute_command without it silently
+    # drops every variable below, and /etc/cis-image-release shipped with
+    # hypervisor/profile/datastream/benchmark all reading "unknown". `sudo -E`
+    # does not help — it preserves an environment that was never set. `env`
+    # applies them to the script's own process regardless of sudoers SETENV.
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E env {{.Vars}} bash -eux '{{.Path}}'"
     script          = "seal.sh"
     # Facts seal.sh cannot discover locally, for /etc/cis-image-release.
     # AUDIT_* are read back out of the audit summary written just above.
