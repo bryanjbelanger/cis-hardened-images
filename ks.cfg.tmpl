@@ -82,6 +82,11 @@ audit
 aide
 chrony
 firewalld
+# cronie: CIS package_cron_installed requires a cron daemon. Rocky's minimal
+# install happens to include it; AlmaLinux's does not, which showed up as a
+# failure only once Alma was built. Listing it explicitly keeps EL targets
+# converged regardless of what each vendor puts in @^minimal-environment.
+cronie
 %end
 
 %post --log=/root/ks-post.log
