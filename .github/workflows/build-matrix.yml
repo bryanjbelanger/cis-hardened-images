@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       max_parallel:
-        description: "Concurrent builds. 1 is the only value proven on this host — 2 caused guest kernel stalls and both builds timed out."
+        description: "Concurrent builds. 2 is evidenced on this host; 3 is the current default and unproven. Drop to 2 if guests stall at 'Waiting for SSH' with a disk that never grows."
         required: false
-        default: "1"
+        default: "3"
       publish:
         description: "Attach OVAs to a GitHub release"
         required: false
@@ -26,13 +26,20 @@ jobs:
       # Never cancel siblings: a failure in one image must not discard three
       # other 70-minute builds that are already most of the way through.
       fail-fast: false
-      # MEASURED, not estimated. 4 was sized from RAM and core count and was
-      # wrong: two concurrent builds on this host produced guest kernel stalls
-      # (RCU stall in vmwgfx on VMware; the VirtualBox installer wedged 12s in)
-      # and both timed out waiting for SSH. The binding constraint is vCPU
-      # scheduling latency inside guests during install, which bites long before
-      # the host looks busy. Raise only with evidence.
-      max-parallel: 1
+      # The old value of 1 rested on a misdiagnosis. It cited "the VirtualBox
+      # installer wedged 12s in" as evidence of contention — that was the 4MB
+      # VRAM bug (see TROUBLESHOOTING.md), which happens at any parallelism,
+      # including a single build on an idle host. The VMware half of that
+      # evidence was an RCU stall in vmwgfx, also a graphics path.
+      #
+      # Since the VRAM fix, two concurrent builds have completed cleanly on this
+      # host four times (rocky9+alma9, alma10+rocky10, and both VirtualBox
+      # pairs), with host load around 3 on 16 cores.
+      #
+      # 3 is the operator's choice and is NOT yet proven — watch the first run.
+      # If guests stall, the signature is a build sitting at "Waiting for SSH"
+      # with a disk that never grows; drop back to 2, which is evidenced.
+      max-parallel: ${{ fromJSON(inputs.max_parallel || '3') }}
       matrix:
         include:
           - { target: rocky9,     hypervisor: fusion,     fips: "no"  }
