@@ -32,6 +32,11 @@ fi
 if [ -z "$_hash" ] && command -v mkpasswd >/dev/null 2>&1; then
   _hash=$(mkpasswd -m sha-512 "${DEFAULT_PASSWORD}" 2>/dev/null)
 fi
+# python3's crypt module is a last resort: removed in 3.13, so it works on
+# older guests only. Kept because it costs nothing when the others are present.
+if [ -z "$_hash" ] && command -v python3 >/dev/null 2>&1; then
+  _hash=$(python3 -c "import crypt,sys;print(crypt.crypt(sys.argv[1],crypt.mksalt(crypt.METHOD_SHA512)))" "${DEFAULT_PASSWORD}" 2>/dev/null)
+fi
 if [ -z "$_hash" ]; then
   echo "[lock] ERROR: no way to hash the default password (need openssl or mkpasswd)" >&2
   exit 1
