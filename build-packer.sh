@@ -26,6 +26,13 @@ esac
 # vars file rather than guessing, or the pre-clean misses and packer aborts with
 # "output directory already exists".
 VM_NAME=$(grep -E '^\s*vm_name' "packer/vars/${TARGET}.pkrvars.hcl" | cut -d'"' -f2)
+# FIPS must be part of the name. The vars file has one vm_name per target, so the
+# FIPS and non-FIPS builds of the same target/hypervisor otherwise share a VM
+# name, an output directory and a VirtualBox registration. Under max-parallel > 1
+# they run at the same time and destroy each other — the non-FIPS rocky9/fusion
+# build and its FIPS sibling both failed this way on the first parallel CI run.
+# Serial builds never exposed it.
+if [ "$FIPS_MODE" = yes ]; then VM_NAME="${VM_NAME}-fips"; fi
 OUT_DIR="build/packer/${VM_NAME}-${OUT_SUFFIX}"
 
 echo "==> stopping any leftover build VMs"
@@ -54,13 +61,17 @@ fi
 # `sleep 3` was not enough: removing the VM's files while the process still held
 # them left a zombie vmx, and the next build died with
 # "error connecting to VNC: connection refused".
+# Match the ABSOLUTE path, not the basename. Every self-hosted runner lives on
+# this one Mac, so `vmware-vmx.*cis-rocky9-vmware` also matches a sibling job's
+# VM in another workspace and kills a build minutes from finishing.
+VMX_PAT="vmware-vmx.*$(pwd)/$OUT_DIR/"
 for _ in $(seq 1 30); do
-  pgrep -f "vmware-vmx.*$(basename "$OUT_DIR")" >/dev/null 2>&1 || break
+  pgrep -f "$VMX_PAT" >/dev/null 2>&1 || break
   sleep 2
 done
-if pgrep -f "vmware-vmx.*$(basename "$OUT_DIR")" >/dev/null 2>&1; then
+if pgrep -f "$VMX_PAT" >/dev/null 2>&1; then
   echo "    vmx still alive after 60s — force killing"
-  pkill -f "vmware-vmx.*$(basename "$OUT_DIR")" || true
+  pkill -f "$VMX_PAT" || true
   sleep 5
 fi
 echo "    clearing $OUT_DIR"
@@ -84,5 +95,6 @@ if [ "${PROVISIONER:-kickstart}" = autoinstall ]; then
 fi
 
 exec packer build -on-error=abort -only="$ONLY" \
+  -var "vm_name=${VM_NAME}" \
   -var "render_suffix=-${HV}" ${EXTRA[@]+"${EXTRA[@]}"} \
   -var-file="packer/vars/${TARGET}.pkrvars.hcl" packer/

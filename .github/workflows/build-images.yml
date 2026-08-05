@@ -139,14 +139,40 @@ jobs:
           # nobody asked for and that no longer matches the source.
           PREFIX="cis-${{ inputs.target }}-$( [ "${{ inputs.hypervisor }}" = fusion ] && echo vmware || echo virtualbox )"
           echo "publishing assets matching ${PREFIX}*"
+          expected=""
           found=0
           for f in build/packer/${PREFIX}*; do
             [ -f "$f" ] || continue
-            gh release upload "$TAG" "$f" --clobber
+            n=$(basename "$f")
+            # Retry: multi-GB uploads over a home connection do fail transiently.
+            ok=0
+            for attempt in 1 2 3; do
+              if gh release upload "$TAG" "$f" --clobber; then ok=1; break; fi
+              echo "upload attempt $attempt failed for $n — retrying"
+              sleep 15
+            done
+            [ "$ok" = 1 ] || { echo "::error::upload failed after 3 attempts: $n"; exit 1; }
+            expected="$expected $n"
             found=$((found+1))
           done
           [ "$found" -gt 0 ] || { echo "::error::no artifacts matched ${PREFIX}*"; exit 1; }
-          echo "uploaded $found asset(s)"
+
+          # VERIFY AGAINST THE RELEASE, not against gh's exit code. On the first
+          # parallel CI run `gh release upload` reported success for a 1.4GB OVA
+          # and the asset was simply not there afterwards — the job went green
+          # while the release silently lacked an image. Counting attempts is not
+          # evidence that anything landed.
+          sleep 5
+          present=$(gh release view "$TAG" --json assets --jq '[.assets[].name] | join(" ")')
+          missing=""
+          for n in $expected; do
+            case " $present " in *" $n "*) ;; *) missing="$missing $n" ;; esac
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::uploads reported success but these assets are absent from $TAG:$missing"
+            exit 1
+          fi
+          echo "verified $found asset(s) present on $TAG"
 
       - name: Build evidence
         if: always()
