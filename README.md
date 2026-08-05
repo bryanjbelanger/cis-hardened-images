@@ -395,16 +395,28 @@ live data inside a 5.2 GB allocated disk on a 25 GB declaration.
 
 ## Known-exceptions log
 
-| Rule | Status | Rationale |
-|---|---|---|
-| `grub2_password`, `grub2_uefi_password` | **Accepted exception** | A bootloader password baked into a distributable OVA is shared by every recipient, and does not protect an image whose virtual disk can simply be mounted. Deployers should run `grub2-setpassword` after deploying to a real host. |
-| `service_systemd-journal-upload_enabled` | **Accepted exception** | Requires a remote log host in `/etc/systemd/journal-upload.conf`; there is no correct site-neutral value. Deployers configure their log server and enable the unit. |
-| `ensure_redhat_gpgkey_installed` | **False positive** | The rule checks for Red Hat's GPG key; RHEL rebuilds ship their own vendor key. Not applicable to Rocky/Alma. |
-| `service_nftables_enabled` (Ubuntu) | **Unsatisfiable pair** | The CIS Ubuntu profile contains BOTH `service_nftables_enabled` and `service_nftables_disabled`, because the benchmark expects one firewall utility to be chosen. ufw is Ubuntu's default, so nftables is masked and this rule cannot pass — exactly one of the pair fails whichever way you go. |
-| `accounts_password_last_change_is_in_past` | **Build artifact** | Passwords are set minutes before the audit. The seal step's `chage -d 0 builder` resolves it in the shipped image. |
-| `package_cron_installed` (AlmaLinux 9 and 10 only) | **False positive — upstream content bug** | The AlmaLinux datastreams check for a package named `cron`, which is the *Debian* name; EL ships `cronie`. The generated remediation is literally `rpm -q "cron" \|\| dnf install -y "cron"`, so the rule cannot pass on any RPM system. The image does have a working cron: the sibling rule *Enable cron Service* passes. Rocky's `ssg-rl10`/`ssg-rhel9` content checks `cronie` and passes. |
-| `aide_build_database` (AlmaLinux 10 only) | **Measurement artifact** | The audit deliberately runs *before* the seal step, because sealing locks root and ends inspection — but the AIDE baseline is built *during* sealing. The shipped image does have one; the build's own seal log records `/var/lib/aide/aide.db.gz` at ~3.3 MB. Rocky 10 passes only because its content remediates the rule earlier, during the hardening pass. |
-| `accounts_password_pam_unix_authtok` (AlmaLinux 10 only) | **Open — not yet diagnosed** | The remediation edits `/etc/pam.d/system-auth` directly, which EL10 manages through authselect, so the edit may not survive. Not verified: the VM is destroyed after sealing and the guest's PAM state was not captured. Listed here rather than left silently in the fail count. |
+Every rule that fails in a published image is listed here — there are no
+undocumented failures. Each row says what it is, why it is not fixed in the
+image, and **what you should do about it on a deployed host**.
+
+Check your own image at any time:
+
+```bash
+sudo oscap xccdf eval --profile "$(grep ^SCAP_PROFILE= /etc/cis-image-release | cut -d\" -f2)" \
+  --report /root/cis-report.html \
+  "/usr/share/xml/scap/ssg/content/$(grep ^SCAP_DATASTREAM= /etc/cis-image-release | cut -d\" -f2)"
+```
+
+| Rule | Status | Why it fails | What you should do |
+|---|---|---|---|
+| `grub2_password`, `grub2_uefi_password` | **Accepted exception** | A bootloader password baked into a distributable OVA is shared by every recipient, and protects nothing on an image whose virtual disk can simply be mounted. | **Set one after deploying.** EL: `sudo grub2-setpassword`. Ubuntu: generate a hash with `grub-mkpasswd-pbkdf2`, add `set superusers` / `password_pbkdf2` to `/etc/grub.d/40_custom`, then `sudo update-grub`. |
+| `service_systemd-journal-upload_enabled` | **Accepted exception** | Needs a remote log host; there is no correct site-neutral value to ship. | **Point it at your log server.** Set `URL=` in `/etc/systemd/journal-upload.conf`, then `sudo systemctl enable --now systemd-journal-upload`. |
+| `accounts_password_last_change_is_in_past` | **Build artifact** | Passwords are set minutes before the audit runs. | **Nothing.** Resolved the moment you change the `builder` password at first login, which is forced. Confirm with `sudo chage -l builder`. |
+| `ensure_redhat_gpgkey_installed` (Rocky) | **False positive** | Checks for Red Hat's GPG key specifically; RHEL rebuilds ship their own vendor key. | **Nothing.** Confirm your vendor key is present: `rpm -q gpg-pubkey --qf '%{SUMMARY}\n'`. |
+| `package_cron_installed` (AlmaLinux) | **False positive — upstream content bug** | Alma's datastreams check for a package named `cron`, the Debian name. EL ships `cronie`, so the check cannot pass on any RPM system. The sibling rule *Enable cron Service* passes. | **Nothing.** Confirm cron really is there: `rpm -q cronie && systemctl is-enabled crond`. |
+| `aide_build_database` (AlmaLinux 10) | **Measurement artifact** | The audit runs before the seal step, and the AIDE baseline is built *during* sealing. | **Nothing to fix, but re-baseline after you configure the host:** `sudo aide --init && sudo mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz`. Verify the shipped one with `ls -l /var/lib/aide/aide.db.gz`. |
+| `service_nftables_enabled` (Ubuntu) | **Unsatisfiable pair** | The CIS Ubuntu profile contains BOTH `service_nftables_enabled` and `service_nftables_disabled` — the benchmark expects you to pick one firewall. ufw is Ubuntu's default, so nftables is masked and exactly one of the pair fails whichever way you go. | **Decide, do not chase the rule.** Keep ufw (`sudo ufw status`), or switch: `sudo systemctl unmask --now nftables && sudo ufw disable`. |
+| `accounts_password_pam_unix_authtok` (AlmaLinux 10) | **Open — not yet diagnosed** | The rule wants `use_authtok` on the `pam_unix.so` password line. Its remediation edits `/etc/pam.d/system-auth` directly, which EL10 manages through authselect, so the edit may not survive. Root cause not confirmed. | **Check, and fix via authselect if your policy requires it.** Inspect with `grep pam_unix /etc/pam.d/system-auth`. If `use_authtok` is absent, add it in an authselect custom profile rather than editing the file directly (`authselect create-profile`, edit, `authselect select custom/<name>`, `authselect apply-changes`) — a direct edit will be reverted. |
 
 Fixed in `%post` rather than excepted: `sshd_limit_user_access`
 (`AllowGroups wheel` — site policy, `builder` is in `wheel`),
