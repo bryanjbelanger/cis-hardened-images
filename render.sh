@@ -61,8 +61,10 @@ render_one() {
   # DRIVER=packer renders a kickstart that reboots into the installed system
   # (Packer provisions over SSH); anything else powers off for the MCP flow.
   local shutdown_stanza="poweroff"
+  local autoinstall_shutdown="poweroff"
   if [[ ${DRIVER:-mcp} == packer ]]; then
     shutdown_stanza="reboot --eject"
+    autoinstall_shutdown="reboot"
   fi
   # FIPS is enabled in %post with fips-mode-setup, NOT via a fips=1 bootloader
   # arg: with a separate /boot (which the CIS layout mandates) dracut also needs
@@ -135,14 +137,14 @@ oscap xccdf eval --remediate \\
     local pw_hash
     pw_hash=$(PW_BUILDER="$PW_BUILDER" .venv/bin/python -c \
       "from passlib.hash import sha512_crypt;import os;print(sha512_crypt.hash(os.environ['PW_BUILDER']))")
-    OUTDIR_V=$outdir HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs \
+    OUTDIR_V=$outdir AUTOINSTALL_SHUTDOWN_V=$autoinstall_shutdown HOSTNAME_V=$HOSTNAME BUILDER_HASH_V=$pw_hash FIPS_V=$fips_arg FIPS_POST_V=$fips_post ROOT_PW_V=$PW_ROOT_BUILD GUEST_PKGS_V=$guest_pkgs \
     CIS_PROFILE_V=$CIS_PROFILE SSG_DS_V=$SSG_DS STAGE_DS_V=$stage_ds \
     python3 - "$tgt" << 'PYEOF'
 import os, sys
 tmpl = open("autoinstall.tmpl").read()
 for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@BUILDER_PW_HASH@","BUILDER_HASH_V"),
                    ("@FIPS_ARG@","FIPS_V"),("@CIS_PROFILE@","CIS_PROFILE_V"),("@ROOT_PW@","ROOT_PW_V"),
-                   ("@SSG_DS@","SSG_DS_V"),("@STAGE_DS@","STAGE_DS_V"),("@GUEST_PKGS@","GUEST_PKGS_V")]:
+                   ("@SSG_DS@","SSG_DS_V"),("@STAGE_DS@","STAGE_DS_V"),("@GUEST_PKGS@","GUEST_PKGS_V"),("@AUTOINSTALL_SHUTDOWN@","AUTOINSTALL_SHUTDOWN_V")]:
     tmpl = tmpl.replace(token, os.environ[env])
 tgt = sys.argv[1]
 open(os.environ["OUTDIR_V"] + "/user-data", "w").write(tmpl)

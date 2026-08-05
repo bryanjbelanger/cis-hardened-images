@@ -72,6 +72,16 @@ DRIVER=packer HYPERVISOR="$HYPERVISOR" FIPS="$FIPS_MODE" ./render.sh "$TARGET"
 ./validate.sh "$TARGET"
 
 echo "==> packer build"
+# Ubuntu (autoinstall) differs from EL only in the delivery volume, the config
+# directory, and needing a datastream staged in — see prepare.sh.
+source "targets/${TARGET}.env"
+EXTRA=()
+if [ "${PROVISIONER:-kickstart}" = autoinstall ]; then
+  EXTRA+=(-var "cd_label=CIDATA" -var "provisioning_dir=cidata")
+  DS="build/ssgx/usr/share/xml/scap/ssg/content/${SSG_DS}"
+  [ -f "$DS" ] && EXTRA+=(-var "staged_datastream=$(pwd)/$DS")
+fi
+
 exec packer build -on-error=abort -only="$ONLY" \
-  -var "render_suffix=-${HV}" \
+  -var "render_suffix=-${HV}" "${EXTRA[@]}" \
   -var-file="packer/vars/${TARGET}.pkrvars.hcl" packer/

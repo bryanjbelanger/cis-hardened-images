@@ -65,6 +65,23 @@ variable "cpus" {
   type    = number
   default = 2
 }
+variable "cd_label" {
+  type    = string
+  default = "OEMDRV"
+  # OEMDRV for EL (Anaconda auto-loads a kickstart from it); CIDATA for Ubuntu
+  # (Subiquity's NoCloud datasource).
+}
+variable "provisioning_dir" {
+  type    = string
+  default = "ks"
+  # "ks" holds ks.cfg; "cidata" holds user-data + meta-data.
+}
+variable "staged_datastream" {
+  type    = string
+  default = ""
+  # Optional local path to a SCAP datastream uploaded before remediation, for
+  # targets whose distro packages lack one (Ubuntu).
+}
 variable "render_suffix" {
   type    = string
   default = ""
@@ -87,7 +104,7 @@ locals {
 
   # render.sh writes the kickstart here; Packer turns the directory into the
   # OEMDRV ISO itself, so make_iso is no longer needed for EL targets.
-  ks_dir = "build/${var.target}${var.render_suffix}/ks"
+  ks_dir = "build/${var.target}${var.render_suffix}/${var.provisioning_dir}"
 }
 
 source "vmware-iso" "cis" {
@@ -102,8 +119,8 @@ source "vmware-iso" "cis" {
   network_adapter_type = "vmxnet3"
   firmware             = "efi"
 
-  cd_files = ["${local.ks_dir}/ks.cfg"]
-  cd_label = "OEMDRV"
+  cd_files = ["${local.ks_dir}/"]
+  cd_label = var.cd_label
 
   communicator           = "ssh"
   ssh_username           = var.ssh_username
@@ -136,8 +153,8 @@ source "virtualbox-iso" "cis" {
   iso_interface = "sata"
   firmware      = "efi"
 
-  cd_files = ["${local.ks_dir}/ks.cfg"]
-  cd_label = "OEMDRV"
+  cd_files = ["${local.ks_dir}/"]
+  cd_label = var.cd_label
 
   # Guest Additions pull in gcc/make and have no place in a hardened minimal
   # image. Packer reaches the guest over its own NAT port-forward instead.
@@ -169,6 +186,20 @@ source "virtualbox-iso" "cis" {
 build {
   name    = "cis"
   sources = ["source.vmware-iso.cis", "source.virtualbox-iso.cis"]
+
+  # Ubuntu's packaged SCAP content may not include this release's datastream,
+  # so a verified copy rides along and prepare.sh installs it.
+  provisioner "file" {
+    source      = var.staged_datastream != "" ? var.staged_datastream : "/dev/null"
+    destination = "/tmp/${var.ssg_ds}"
+  }
+
+  # No-op on EL (toolchain arrives via kickstart); installs it on Ubuntu, where
+  # Subiquity cannot.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
+    script          = "prepare.sh"
+  }
 
   # Everything below runs as root inside the installed system. It mirrors the
   # MCP flow exactly, so results stay comparable to the hand-driven baselines.

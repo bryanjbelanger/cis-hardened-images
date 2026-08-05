@@ -118,4 +118,7 @@ autoinstall:
     - cp -a /var/log/installer /target/var/log/installer-failed || true
     - cp -a /var/log/syslog /target/var/log/installer-syslog || true
 
-  shutdown: poweroff
+  # poweroff for the MCP flow (the host watches for power-off, then boots the
+  # installed system itself); reboot for Packer, which waits for SSH ON the
+  # installed system. render.sh substitutes this from DRIVER.
+  shutdown: @AUTOINSTALL_SHUTDOWN@
