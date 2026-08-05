@@ -144,20 +144,39 @@ source "virtualbox-iso" "cis" {
   memory               = var.memory_mb
   disk_size            = var.disk_size_mb
   hard_drive_interface = "sata"
-  # SATA + EFI. Upstream packer-plugin-virtualbox hardcodes ISO attachment to
-  # SATA ports 13/15, which VirtualBox's EFI firmware cannot boot from — black
-  # screen, empty disk, SSH timeout at 45 minutes. Requires the patched plugin
-  # from bryanjbelanger/packer-plugin-virtualbox (branch fix/efi-sata-iso-ports),
-  # which attaches from port 1 for EFI guests while leaving BIOS unchanged.
-  # Upstream refs: hashicorp/packer-plugin-virtualbox#39 and #20.
-  iso_interface = "sata"
-  firmware      = "efi"
+  # BIOS, deliberately — VMware uses EFI, this does not, and the images are
+  # equivalent either way because the kickstart's `reqpart --add-boot` lets
+  # Anaconda create whatever the platform needs (an ESP under EFI, a biosboot
+  # partition under BIOS). Nothing in the CIS layout depends on the firmware.
+  #
+  # EFI here was a dead end, and it cost two failed builds to establish why.
+  # Upstream attaches ISOs to high SATA ports (13/15) that VirtualBox's EFI
+  # firmware will not boot from; the patched plugin
+  # (bryanjbelanger/packer-plugin-virtualbox, fix/efi-sata-iso-ports, upstream
+  # refs #39 and #20) correctly moves them to port 1, and VBoxManage confirms
+  # the ISO lands there — but the firmware STILL does not boot it. VBox.log
+  # shows the AHCI ports being probed, then `NAT: Link up`: EFI finds nothing
+  # bootable and falls through to network boot. The port fix is necessary but
+  # not sufficient, and the remaining fault is in VirtualBox's EFI itself.
+  #
+  # ISOs on IDE, which is the plugin's own default and the most compatible path
+  # on VirtualBox. `iso_interface = "sata"` was only ever set to work around the
+  # EFI port bug, and it caused its own failure: under BIOS the installer kernel
+  # booted, initialised AHCI, probed the DVDs on ports 13/15 — and then froze
+  # dead, ~9s into the kernel, with zero further console output or disk I/O for
+  # ten minutes. Not host oversubscription (load 3 on 16 cores, no other VMs).
+  # With EFI abandoned there is no reason to keep the guest on AHCI for its
+  # installer media.
+  firmware = "bios"
 
   cd_files = ["${local.ks_dir}/"]
   cd_label = var.cd_label
 
-  # Guest Additions pull in gcc/make and have no place in a hardened minimal
-  # image. Packer reaches the guest over its own NAT port-forward instead.
+  # Do NOT attach/upload Oracle's Guest Additions ISO — the image installs the
+  # EPEL virtualbox-guest-additions package in the kickstart instead (service
+  # vboxservice, mirroring open-vm-tools/vmtoolsd on VMware). The distro package
+  # ships prebuilt modules, so no compiler toolchain lands in the image. This
+  # setting concerns the build only; the shipped guest DOES have the agent.
   guest_additions_mode = "disable"
 
   # EFI + VirtualBox will not boot the installer unless the DVD is explicitly

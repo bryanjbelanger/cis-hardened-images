@@ -340,13 +340,22 @@ Fusion and VMware Workstation share the VMX/VMDK format, so a Fusion build
 covers both; keep `virtualHW.version` conservative (19) so older Workstation
 releases can open the result.
 
-**Guest access during the build differs by hypervisor.** VMware exposes guest
-operations through VMware Tools, which these images already install. VirtualBox's
-equivalent (`VBoxManage guestcontrol`) requires Guest Additions, which drag in
-gcc/make and do not belong in a hardened minimal image — so VirtualBox builds use
-SSH over a NAT port-forward instead, and the shipped image stays clean. Note the
-hardened sshd rate-limits connections (`MaxStartups`): drive it with one
-connection at a time, not a burst.
+**Both families ship a guest agent.** VMware images install `open-vm-tools`
+(service `vmtoolsd`); VirtualBox images install `virtualbox-guest-additions` from
+EPEL (service `vboxservice`). These are the distro-packaged Guest Additions —
+GPLv2, with prebuilt kernel modules, so no compiler toolchain enters the image.
+They are unrelated to Oracle's **Extension Pack**, which is proprietary (PUEL)
+and is not used here.
+
+Packer's `guest_additions_mode = "disable"` is therefore about the *build*, not
+the image: it stops Packer attaching and uploading Oracle's Guest Additions ISO,
+because the guest already gets the agent from EPEL.
+
+**Guest access during the build is SSH over a NAT port-forward on VirtualBox.**
+That is simply Packer's communicator, driving the installed system the same way
+on both hypervisors — not a consequence of any missing agent. Note the hardened
+sshd rate-limits connections (`MaxStartups`): drive it with one connection at a
+time, not a burst.
 
 ## Distribution
 
