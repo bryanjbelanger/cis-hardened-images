@@ -11,6 +11,10 @@ on:
       hypervisor:  { required: true,  type: string }
       fips:        { required: false, type: string, default: "no" }
       publish:     { required: false, type: string, default: "no" }
+      # Passed down by build-matrix.yml so every job in a run targets ONE
+      # release. Each job computing its own date splits a run that crosses
+      # midnight across two tags — half the images in each.
+      release_tag: { required: false, type: string, default: "" }
   workflow_dispatch:
     inputs:
       target:
@@ -94,10 +98,10 @@ jobs:
           FIPS=${{ inputs.fips || 'no' }} ./render.sh "${{ inputs.target || 'rocky9' }}"
           ./validate.sh "${{ inputs.target || 'rocky9' }}"
 
-      # The build itself is still driven interactively through the MCP servers
-      # (they own VM lifecycle, guest ops and export). This step is the hook for
-      # a headless driver script; until that exists the workflow stops here with
-      # validated inputs, which is still worth running on every change.
+      # This is a real, headless build — install through export. The comment
+      # that used to sit here said the workflow stopped at validated inputs
+      # because VM lifecycle was still driven interactively through the MCP
+      # servers; build-packer.sh replaced that and the note went stale.
       - name: Build image
         run: |
           # build-packer.sh owns cleanup ordering, render isolation and the
@@ -113,7 +117,8 @@ jobs:
           # Date lives in the TAG so asset names stay stable and resolvable
           # from "latest". Consumers (the desktop-hypervisor-mcp image catalog)
           # select a release by tag, then match asset names EXACTLY.
-          TAG="v$(date +%Y.%m.%d)"
+          TAG="${{ inputs.release_tag }}"
+          [ -n "$TAG" ] || TAG="v$(date +%Y.%m.%d)"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Hardened images $(date +%Y-%m-%d)" \
             --notes "CIS-hardened images. See README for first-login steps and accepted exceptions."

@@ -21,7 +21,19 @@ permissions:
   contents: write
 
 jobs:
+  # One tag for the whole run. Each build job computing its own date would split
+  # a run that crosses midnight across two releases, with half the images in
+  # each — and nothing would report an error.
+  tag:
+    runs-on: [self-hosted, macOS, hypervisor]
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - id: pick
+        run: echo "tag=v$(date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+
   matrix:
+    needs: tag
     strategy:
       # Never cancel siblings: a failure in one image must not discard three
       # other 70-minute builds that are already most of the way through.
@@ -64,4 +76,33 @@ jobs:
       hypervisor: ${{ matrix.hypervisor }}
       fips: ${{ matrix.fips }}
       publish: ${{ inputs.publish }}
+      release_tag: ${{ needs.tag.outputs.tag }}
     secrets: inherit
+
+  # ONE manifest for the whole release, built after the matrix from the
+  # release's own assets.
+  #
+  # make-manifest.sh cannot do this job: it globs build/packer in a single
+  # workspace, and the matrix fans out over several runners, so each job sees
+  # only the images it built. Generating per job would publish a manifest
+  # describing a subset of the release while looking complete, with
+  # `--clobber` handing the result to whichever job finished last.
+  #
+  # always(): a partial matrix still deserves an accurate manifest of what did
+  # publish. The script warns loudly about any image whose evidence is missing.
+  manifest:
+    needs: [tag, matrix]
+    if: ${{ always() && inputs.publish == 'yes' }}
+    runs-on: [self-hosted, macOS, hypervisor]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Build and publish manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          TAG="${{ needs.tag.outputs.tag }}"
+          ./make-manifest-from-release.sh "$TAG"
+          gh release upload "$TAG" manifest.json --clobber
+          echo "manifest published to $TAG"
