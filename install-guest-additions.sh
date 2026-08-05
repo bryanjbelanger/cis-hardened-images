@@ -58,26 +58,45 @@ log "VBoxLinuxAdditions.run exit=$rc"
 
 umount "$MNT" 2>/dev/null; rmdir "$MNT" 2>/dev/null
 
+# Oracle's own log is the authoritative one and says WHY a module build failed;
+# the installer's stdout only says that it did. Stage it where the build can
+# download it — the VM is destroyed after sealing, so anything not copied out
+# here is unrecoverable.
+if [ -f /var/log/vboxadd-setup.log ]; then
+  cp /var/log/vboxadd-setup.log /tmp/vboxadd-setup.log 2>/dev/null
+  chmod a+r /tmp/vboxadd-setup.log 2>/dev/null
+fi
+
 # Verify against reality, not against the installer's exit code — this project
 # has been bitten before by a step that reported success and did nothing.
+modprobe vboxguest 2>/dev/null
 if lsmod | grep -q vboxguest; then
   log "vboxguest module loaded"
 else
-  modprobe vboxguest 2>/dev/null
-  lsmod | grep -q vboxguest \
-    && log "vboxguest loaded after modprobe" \
-    || log "WARNING: vboxguest not loaded — guestcontrol will not work"
+  log "ERROR: vboxguest not loaded — Guest Additions are NOT functional"
+  log "  compiler errors from /var/log/vboxadd-setup.log:"
+  grep -iE 'error:|fatal|No such file' /var/log/vboxadd-setup.log 2>/dev/null | head -15 | sed 's/^/  | /'
+  log "  installer tail:"
+  tail -15 /tmp/vboxga-install.log 2>/dev/null | sed 's/^/  | /'
+  # Deliberately DO NOT remove the toolchain: leaving it lets the failure be
+  # retried or debugged, and an image that silently lacks its guest agent is
+  # exactly the kind of quiet breakage this pipeline exists to avoid.
+  log "leaving build toolchain installed so this can be retried"
+  exit 1
 fi
 
 for unit in vboxadd vboxadd-service; do
   systemctl enable "$unit" >/dev/null 2>&1 && log "enabled $unit"
 done
 
-command -v VBoxService >/dev/null 2>&1 \
-  && log "VBoxService present: $(VBoxService --version 2>/dev/null | head -1)" \
-  || log "WARNING: VBoxService missing — guestcontrol will not work"
+if ! command -v VBoxService >/dev/null 2>&1; then
+  log "ERROR: VBoxService missing despite modules loading — guestcontrol will not work"
+  exit 1
+fi
+log "VBoxService present: $(VBoxService --version 2>/dev/null | head -1)"
 
-# Remove the build toolchain. Ordering matters: only after the modules exist.
+# Remove the build toolchain. Ordering matters: only reached once the modules
+# genuinely exist and loaded.
 log "removing build toolchain from the image"
 dnf remove -y gcc make kernel-devel elfutils-libelf-devel >/dev/null 2>&1
 dnf clean all >/dev/null 2>&1
@@ -86,5 +105,5 @@ command -v gcc >/dev/null 2>&1 \
   || log "gcc removed"
 
 rm -f "$ISO"
-log "guest additions complete"
+log "guest additions complete and verified"
 exit 0
