@@ -4,6 +4,76 @@ Hard-won findings, written down so they are not rediscovered the expensive way.
 
 ---
 
+## VirtualBox on EL: Guest Additions will not compile
+
+**Status: blocked upstream, and expected to un-block on its own. Re-test when
+either side moves — see the retest condition below.**
+
+### Symptom
+
+`VBoxLinuxAdditions.run` exits non-zero, `vboxguest` never loads, and
+`/var/log/vboxadd-setup.log` contains:
+
+```
+fileio-r0drv-linux.c:162:30: error: implicit declaration of function
+'open_with_fake_path' [-Werror=implicit-function-declaration]
+```
+
+### Cause — an off-by-one in a version guard, not neglect
+
+From the GA 7.2.14 source (`vboxguest/r0drv/linux/fileio-r0drv-linux.c`):
+
+```c
+# if RTLNX_VER_MIN(6,10,0)
+      kernel_file_open(&Path, fOpenMode, current_cred());
+# elif RTLNX_VER_MIN(6,5,0) || RTLNX_RHEL_RANGE(9,9, 9,99)
+      kernel_file_open(&Path, fOpenMode, d_inode(Path.dentry), current_cred());
+# elif RTLNX_VER_MIN(4,19,0)
+      open_with_fake_path(&Path, fOpenMode, d_inode(Path.dentry), current_cred());
+```
+
+Oracle does support EL — this source carries 335 RHEL-specific guards. But the
+guard here starts at **RHEL 9.9**, and we build on **9.8**, so compilation falls
+through to the generic ≥4.19 branch and calls a function the kernel no longer
+has.
+
+`RTLNX_RHEL_RANGE` reads `RHEL_MAJOR`/`RHEL_MINOR` — the *point release*. Red Hat
+backports API changes into z-stream kernels **within** a point release, and
+`5.14.0-687.33.1.el9_8` is a late 9.8 build that already carries the
+`kernel_file_open` change Oracle expected in 9.9. A version-number comparison
+cannot see a mid-release backport, which is why nothing on our side fixes it: no
+package is missing, and forcing past `-Werror` only moves the failure to module
+load time on an undefined symbol.
+
+Oracle Linux does not hit this because it defaults to UEK, a much newer
+mainline-based kernel that takes the `RTLNX_VER_MIN(6,10,0)` branch and never
+reaches this code — so a late RHCK 9.8 regression is not in their test path.
+
+### Everything else is closed too
+
+* EPEL 9 ships nothing named `virtualbox` — there is no packaged Guest Additions
+  on EL. A kickstart requesting one leaves Anaconda at an interactive
+  "missing packages … ignore?" prompt that no automated build can answer.
+* Rocky 9 has no in-tree module: `drivers/virt/` contains only `coco` and
+  `nitro_enclaves` (checked inside a guest, not assumed).
+
+### Consequence and retest condition
+
+EL VirtualBox images ship **without a guest agent**, so `VBoxManage
+guestcontrol` does not work against them — drive them over SSH. Ubuntu is
+unaffected; it packages `virtualbox-guest-utils` in universe.
+
+Re-test and re-enable when **either** is true:
+
+* the EL target moves to **9.9 or later** — it then satisfies
+  `RTLNX_RHEL_RANGE(9,9, 9,99)` and should compile unchanged; or
+* a **newer Guest Additions** release moves that lower bound to 9.8.
+
+The scope is narrower than "EL VirtualBox has no agent": it is *Rocky/Alma 9.8
+on a late z-stream kernel, with GA 7.2.14*.
+
+---
+
 ## VirtualBox: the installer hangs and the build times out waiting for SSH
 
 **Fix: give the guest more VRAM.** `gfx_vram_size = 32` in the `virtualbox-iso`
