@@ -364,7 +364,7 @@ live data inside a 5.2 GB allocated disk on a 25 GB declaration.
 
 | Rule | Status | Rationale |
 |---|---|---|
-| `grub2_password` | **Accepted exception** | A bootloader password baked into a distributable OVA is shared by every recipient, and does not protect an image whose virtual disk can simply be mounted. Deployers should run `grub2-setpassword` after deploying to a real host. |
+| `grub2_password`, `grub2_uefi_password` | **Accepted exception** | A bootloader password baked into a distributable OVA is shared by every recipient, and does not protect an image whose virtual disk can simply be mounted. Deployers should run `grub2-setpassword` after deploying to a real host. |
 | `service_systemd-journal-upload_enabled` | **Accepted exception** | Requires a remote log host in `/etc/systemd/journal-upload.conf`; there is no correct site-neutral value. Deployers configure their log server and enable the unit. |
 | `ensure_redhat_gpgkey_installed` | **False positive** | The rule checks for Red Hat's GPG key; RHEL rebuilds ship their own vendor key. Not applicable to Rocky/Alma. |
 | `service_nftables_enabled` (Ubuntu) | **Unsatisfiable pair** | The CIS Ubuntu profile contains BOTH `service_nftables_enabled` and `service_nftables_disabled`, because the benchmark expects one firewall utility to be chosen. ufw is Ubuntu's default, so nftables is masked and this rule cannot pass — exactly one of the pair fails whichever way you go. |
