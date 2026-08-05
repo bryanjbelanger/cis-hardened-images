@@ -82,20 +82,14 @@ audit
 aide
 chrony
 firewalld
-# cronie
-# openssl: needed to hash the shipped default password at seal time. EL10's
-# minimal install has neither the openssl CLI nor mkpasswd, so the lock step
-# had no way to produce a $6$ hash and correctly refused to ship an image
-# nobody could log into.
-openssl: CIS package_cron_installed requires a cron daemon. Rocky's minimal
-# install happens to include it; AlmaLinux's does not, which showed up as a
-# failure only once Alma was built. Listing it explicitly keeps EL targets
-# converged regardless of what each vendor puts in @^minimal-environment.
+# cronie and openssl are listed explicitly because vendors differ on what
+# @^minimal-environment contains, and both are required:
+#   cronie  — CIS package_cron_installed. Rocky's minimal group includes it,
+#             AlmaLinux's does not.
+#   openssl — used at seal time to hash the shipped default password. EL10
+#             minimal has neither the openssl CLI nor mkpasswd, so the lock
+#             step had no way to produce a $6$ hash.
 cronie
-# openssl: needed to hash the shipped default password at seal time. EL10's
-# minimal install has neither the openssl CLI nor mkpasswd, so the lock step
-# had no way to produce a $6$ hash and correctly refused to ship an image
-# nobody could log into.
 openssl
 %end
 
