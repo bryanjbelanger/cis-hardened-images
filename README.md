@@ -330,6 +330,11 @@ plus `ensure_redhat_gpgkey_installed` and
 
 ## Hypervisor portability
 
+> Hit a VirtualBox build that hangs at `Waiting for SSH` with a 2 MB disk? It is
+> almost certainly VRAM, not what you think. See
+> [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before investigating — it also lists
+> three plausible causes that have already been tested and ruled out.
+
 The same kickstart builds identically on **VMware Fusion** and **VirtualBox**:
 Rocky 9 scores 274 pass / 2 fail on both, with all 21 partition/mount rules
 passing. The OEMDRV delivery mechanism, the CIS layout and the `%post`
