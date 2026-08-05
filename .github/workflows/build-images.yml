@@ -119,9 +119,20 @@ jobs:
           # select a release by tag, then match asset names EXACTLY.
           TAG="${{ inputs.release_tag }}"
           [ -n "$TAG" ] || TAG="v$(date +%Y.%m.%d)"
+          # --prerelease: these are published for review before being promoted.
+          # Promote deliberately with `gh release edit <tag> --prerelease=false`.
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Hardened images $(date +%Y-%m-%d)" \
-            --notes "CIS-hardened images. See README for first-login steps and accepted exceptions."
+            --prerelease \
+            --notes "CIS-hardened Linux images, built and audited with OpenSCAP.
+
+          Verify before importing: \`shasum -a 256 -c <asset>.sha256\`
+
+          First login is \`builder\` / \`builder\`, expired on first use. Root is locked.
+          \`manifest.json\` carries full provenance for every image.
+
+          Every failing rule is documented with remediation in the project README's
+          known-exceptions log — none is an unhardened control left unattended."
           # Upload ONLY what this job built. A self-hosted runner keeps its
           # workspace between runs, so a bare build/packer/*.ova glob also
           # publishes stale OVAs from earlier runs — silently shipping an image
