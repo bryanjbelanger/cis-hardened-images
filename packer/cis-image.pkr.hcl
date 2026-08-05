@@ -259,7 +259,9 @@ build {
   # Seal, then verify its log, then lock — deliberately three steps. Merging
   # seal and lock once hid a silently-failed AIDE baseline.
   provisioner "shell" {
-    execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
+    # sudo -E: without it sudo strips the environment and every SCAP field in
+    # /etc/cis-image-release came out "unknown".
+    execute_command = "echo '${var.ssh_password}' | sudo -S -E bash -eux '{{.Path}}'"
     script          = "seal.sh"
     # Facts seal.sh cannot discover locally, for /etc/cis-image-release.
     # AUDIT_* are read back out of the audit summary written just above.

@@ -119,6 +119,13 @@ fi
 # Modelled on /etc/os-release. The build passes CIS_PROFILE / SSG_DS / AUDIT_*
 # in the environment; everything else is discovered locally.
 log "writing /etc/cis-image-release"
+# The audit step wrote its summary in the guest; read the counts from there
+# rather than threading them through the environment.
+_audit_pass="unknown"; _audit_fail="unknown"
+if [ -f /tmp/audit-summary.txt ]; then
+  _audit_pass=$(grep -oE '^pass=[0-9]+' /tmp/audit-summary.txt | cut -d= -f2)
+  _audit_fail=$(grep -oE '^fail=[0-9]+' /tmp/audit-summary.txt | cut -d= -f2)
+fi
 _ssg_version="unknown"
 if command -v rpm >/dev/null 2>&1; then
   _ssg_version=$(rpm -q --qf '%{VERSION}-%{RELEASE}' scap-security-guide 2>/dev/null || echo unknown)
@@ -146,8 +153,8 @@ SCAP_PROFILE="${CIS_PROFILE:-unknown}"
 SCAP_DATASTREAM="${SSG_DS:-unknown}"
 SCAP_CONTENT_VERSION="${_ssg_version}"
 BENCHMARK="${_benchmark:-unknown}"
-AUDIT_PASS="${AUDIT_PASS:-unknown}"
-AUDIT_FAIL="${AUDIT_FAIL:-unknown}"
+AUDIT_PASS="${_audit_pass:-unknown}"
+AUDIT_FAIL="${_audit_fail:-unknown}"
 AUDIT_NOTES="Known exceptions are documented at the project README."
 PROJECT_URL="https://github.com/bryanjbelanger/cis-hardened-images"
 PROVENANCE
