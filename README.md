@@ -106,6 +106,12 @@ Three rules, and they exist for a reason:
 3. **Architecture suffix.** Adding `arm64` builds later then changes nothing
    else about resolution.
 
+## Upstream contributions
+
+A bug found here was fixed and sent upstream —
+[packer-plugin-virtualbox#192](https://github.com/hashicorp/packer-plugin-virtualbox/pull/192)
+(EFI guests cannot boot ISOs on high SATA ports). See [UPSTREAM.md](UPSTREAM.md).
+
 ## Honest limitations
 
 - **These images are not certified.** They are hardened against a published

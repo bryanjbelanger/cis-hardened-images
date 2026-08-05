@@ -127,12 +127,13 @@ source "virtualbox-iso" "cis" {
   memory               = var.memory_mb
   disk_size            = var.disk_size_mb
   hard_drive_interface = "sata"
-  # ISO on IDE, NOT sata. With iso_interface="sata" Packer attached the
-  # installer to SATA port 13 (and the kickstart ISO to port 15), and
-  # VirtualBox's EFI firmware never found a bootable device — black screen,
-  # 2MB disk, SSH timeout after 45 minutes. Verified directly: identical VM
-  # with the ISO on IDE port 0 boots the installer in seconds.
-  iso_interface = "ide"
+  # SATA + EFI. Upstream packer-plugin-virtualbox hardcodes ISO attachment to
+  # SATA ports 13/15, which VirtualBox's EFI firmware cannot boot from — black
+  # screen, empty disk, SSH timeout at 45 minutes. Requires the patched plugin
+  # from bryanjbelanger/packer-plugin-virtualbox (branch fix/efi-sata-iso-ports),
+  # which attaches from port 1 for EFI guests while leaving BIOS unchanged.
+  # Upstream refs: hashicorp/packer-plugin-virtualbox#39 and #20.
+  iso_interface = "sata"
   firmware      = "efi"
 
   cd_files = ["${local.ks_dir}/ks.cfg"]
