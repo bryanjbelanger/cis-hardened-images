@@ -117,10 +117,20 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Hardened images $(date +%Y-%m-%d)" \
             --notes "CIS-hardened images. See README for first-login steps and accepted exceptions."
-          ./make-manifest.sh "$TAG"
-          for f in build/packer/*.ova build/packer/*.sha256 build/packer/*audit*.txt build/packer/*seal*.log build/packer/*release.txt build/packer/manifest.json; do
-            [ -f "$f" ] && gh release upload "$TAG" "$f" --clobber
+          # Upload ONLY what this job built. A self-hosted runner keeps its
+          # workspace between runs, so a bare build/packer/*.ova glob also
+          # publishes stale OVAs from earlier runs — silently shipping an image
+          # nobody asked for and that no longer matches the source.
+          PREFIX="cis-${{ inputs.target }}-$( [ "${{ inputs.hypervisor }}" = fusion ] && echo vmware || echo virtualbox )"
+          echo "publishing assets matching ${PREFIX}*"
+          found=0
+          for f in build/packer/${PREFIX}*; do
+            [ -f "$f" ] || continue
+            gh release upload "$TAG" "$f" --clobber
+            found=$((found+1))
           done
+          [ "$found" -gt 0 ] || { echo "::error::no artifacts matched ${PREFIX}*"; exit 1; }
+          echo "uploaded $found asset(s)"
 
       - name: Build evidence
         if: always()

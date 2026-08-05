@@ -45,6 +45,10 @@ jobs:
           - { target: rocky10,    hypervisor: virtualbox, fips: "yes" }
           # FIPS is EL-only: Ubuntu's certified modules come through Ubuntu Pro,
           # whose redistribution terms are unresolved for a public image.
+          - { target: alma9,      hypervisor: fusion,     fips: "no"  }
+          - { target: alma9,      hypervisor: virtualbox, fips: "no"  }
+          - { target: alma10,     hypervisor: fusion,     fips: "no"  }
+          - { target: alma10,     hypervisor: virtualbox, fips: "no"  }
           - { target: ubuntu2404, hypervisor: fusion,     fips: "no"  }
           - { target: ubuntu2404, hypervisor: virtualbox, fips: "no"  }
     uses: ./.github/workflows/build-images.yml
