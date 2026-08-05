@@ -75,7 +75,8 @@ echo "==> packer build"
 # Ubuntu (autoinstall) differs from EL only in the delivery volume, the config
 # directory, and needing a datastream staged in — see prepare.sh.
 source "targets/${TARGET}.env"
-EXTRA=()
+EXTRA=()   # NOTE: expanded below as ${EXTRA[@]+"${EXTRA[@]}"} — macOS ships
+           # bash 3.2, where "${EXTRA[@]}" on an EMPTY array trips `set -u`.
 if [ "${PROVISIONER:-kickstart}" = autoinstall ]; then
   EXTRA+=(-var "cd_label=CIDATA" -var "provisioning_dir=cidata")
   DS="build/ssgx/usr/share/xml/scap/ssg/content/${SSG_DS}"
@@ -83,5 +84,5 @@ if [ "${PROVISIONER:-kickstart}" = autoinstall ]; then
 fi
 
 exec packer build -on-error=abort -only="$ONLY" \
-  -var "render_suffix=-${HV}" "${EXTRA[@]}" \
+  -var "render_suffix=-${HV}" ${EXTRA[@]+"${EXTRA[@]}"} \
   -var-file="packer/vars/${TARGET}.pkrvars.hcl" packer/
