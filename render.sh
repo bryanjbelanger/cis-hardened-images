@@ -55,11 +55,16 @@ render_one() {
       # No service is enabled here: the vboxadd units do not exist until the
       # ISO installer has run, and naming them now would fail the kickstart.
       if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
-        # Debian/Ubuntu DO package it (universe).
+        # Debian/Ubuntu DO package it (universe), so they get a working agent.
         guest_pkgs="virtualbox-guest-utils"; guest_svcs="virtualbox-guest-utils"
       else
-        guest_pkgs=$'gcc\nmake\nperl\nbzip2\ntar\nkernel-devel\nelfutils-libelf-devel'
-        guest_svcs=""
+        # EL gets NOTHING. Building from Oracle's ISO was tried and does not
+        # work: the source fails to compile against RHEL 9.8's kernel
+        # (implicit declaration of 'open_with_fake_path' — RHEL reports 5.14
+        # but is heavily backported, so VirtualBox's version checks take the
+        # wrong branch), and Rocky ships no in-tree vboxguest either.
+        # EL VirtualBox images are therefore driven over SSH, not guestcontrol.
+        guest_pkgs=""; guest_svcs=""
       fi ;;
     qemu|kvm)
       guest_pkgs="qemu-guest-agent"; guest_svcs="qemu-guest-agent" ;;

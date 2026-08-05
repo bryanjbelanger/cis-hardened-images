@@ -174,17 +174,24 @@ source "virtualbox-iso" "cis" {
   cd_files = ["${local.ks_dir}/"]
   cd_label = var.cd_label
 
-  # Upload Oracle's Guest Additions ISO into the guest; install-guest-additions.sh
-  # builds and installs it after first boot. This is the ONLY real source on EL —
-  # there is no packaged Guest Additions, and EPEL 9 ships nothing named
-  # virtualbox at all. Requesting one in the kickstart left Anaconda at an
-  # interactive "missing packages ... ignore?" prompt that no automated build can
-  # answer.
+  # EL VirtualBox images ship WITHOUT Guest Additions, and there is currently no
+  # way around it:
+  #   * EL has no packaged Guest Additions — EPEL 9 ships nothing named
+  #     virtualbox at all. (Requesting one in the kickstart left Anaconda stuck
+  #     at an interactive "missing packages ... ignore?" prompt.)
+  #   * Oracle's ISO does not compile against RHEL 9.8's kernel:
+  #       fileio-r0drv-linux.c: implicit declaration of 'open_with_fake_path'
+  #     RHEL reports 5.14 but carries heavy backports, so VirtualBox's
+  #     version-gated compatibility code takes the wrong branch. Forcing it past
+  #     -Werror does not help; the symbol genuinely is not there.
+  #   * Rocky 9 ships no in-tree module either — drivers/virt/ has only coco and
+  #     nitro_enclaves.
+  # Consequence: `VBoxManage guestcontrol` does not work on EL VirtualBox images.
+  # Drive them over SSH, which is what this build does anyway.
   #
-  # Guest Additions are what `VBoxManage guestcontrol` talks to, so this is the
-  # VirtualBox counterpart of open-vm-tools on the VMware images.
-  guest_additions_mode = "upload"
-  guest_additions_path = "/tmp/VBoxGuestAdditions.iso"
+  # Ubuntu is NOT affected — it packages virtualbox-guest-utils in universe, so
+  # its VirtualBox images get a working agent through the normal kickstart path.
+  guest_additions_mode = "disable"
 
   # EFI + VirtualBox will not boot the installer unless the DVD is explicitly
   # first in the boot order — the VM sat at a black screen for 35 minutes with
@@ -225,16 +232,6 @@ build {
   provisioner "shell" {
     execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
     script          = "prepare.sh"
-  }
-
-  # VirtualBox only, and BEFORE remediation: the modules must be built while the
-  # build toolchain is still installed, and the reboot in the middle of the
-  # hardening chain then brings them up cleanly. The script removes the compiler
-  # again once the modules exist.
-  provisioner "shell" {
-    only            = ["virtualbox-iso.cis"]
-    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
-    script          = "install-guest-additions.sh"
   }
 
   # Everything below runs as root inside the installed system. It mirrors the

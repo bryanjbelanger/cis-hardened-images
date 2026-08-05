@@ -345,16 +345,35 @@ Fusion and VMware Workstation share the VMX/VMDK format, so a Fusion build
 covers both; keep `virtualHW.version` conservative (19) so older Workstation
 releases can open the result.
 
-**Both families ship a guest agent.** VMware images install `open-vm-tools`
-(service `vmtoolsd`); VirtualBox images install `virtualbox-guest-additions` from
-EPEL (service `vboxservice`). These are the distro-packaged Guest Additions —
-GPLv2, with prebuilt kernel modules, so no compiler toolchain enters the image.
-They are unrelated to Oracle's **Extension Pack**, which is proprietary (PUEL)
-and is not used here.
+**Guest agents differ by hypervisor, and one combination has none.**
 
-Packer's `guest_additions_mode = "disable"` is therefore about the *build*, not
-the image: it stops Packer attaching and uploading Oracle's Guest Additions ISO,
-because the guest already gets the agent from EPEL.
+| Image | Guest agent | `guestcontrol` / `vmrun` guest ops |
+|---|---|---|
+| VMware (all targets) | `open-vm-tools` (`vmtoolsd`) | works |
+| VirtualBox + Ubuntu | `virtualbox-guest-utils` (universe) | works |
+| **VirtualBox + EL** (Rocky, Alma, CentOS Stream) | **none** | **not available — use SSH** |
+
+Enterprise Linux VirtualBox images ship without Guest Additions because there is
+currently no way to get them:
+
+* EL has no packaged Guest Additions. EPEL 9 ships nothing named `virtualbox` at
+  all — a kickstart requesting one leaves Anaconda stuck at an interactive
+  "missing packages … ignore?" prompt.
+* Oracle's Guest Additions ISO does not compile against RHEL 9.8's kernel:
+  `fileio-r0drv-linux.c: implicit declaration of 'open_with_fake_path'`. RHEL
+  reports kernel 5.14 but carries heavy backports, so VirtualBox's
+  version-gated compatibility code takes the wrong branch. Forcing it past
+  `-Werror` does not help — the symbol genuinely is not present.
+* Rocky 9 ships no in-tree module either; `drivers/virt/` contains only `coco`
+  and `nitro_enclaves`.
+
+Practical effect: drive EL VirtualBox guests over **SSH** rather than
+`VBoxManage guestcontrol`. The build itself works this way, so the path is well
+tested. This will be revisited when Oracle ships Guest Additions sources that
+understand RHEL 9's backported kernels.
+
+Guest Additions are GPLv2 open source. Oracle's **Extension Pack** is the
+proprietary (PUEL) component, and nothing here uses it.
 
 **Guest access during the build is SSH over a NAT port-forward on VirtualBox.**
 That is simply Packer's communicator, driving the installed system the same way
