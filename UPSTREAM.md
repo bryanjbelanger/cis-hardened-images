@@ -5,6 +5,21 @@ belong to.
 
 ## packer-plugin-virtualbox — EFI guests cannot boot ISOs on high SATA ports
 
+> **RETRACTED — the premise below is wrong; do not treat this as a finding.**
+>
+> The failures attributed to the ISO's SATA port were caused by the VM having
+> only 4 MB of VRAM, which wedges Anaconda's graphical-install attempt. With
+> adequate VRAM, EFI boots from port 13 — the exact case called unbootable
+> here. The reproduction table's *"no boot"* rows were almost certainly
+> 4 MB-VRAM VMs and its *"boots"* rows hand-made VMs with the 16 MB default,
+> with the difference misattributed to the port.
+>
+> Verified: EFI + ISO on SATA port 13 + 32 MB VRAM boots the graphical
+> installer. Full evidence table in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+>
+> **Action: withdraw or rewrite PR #192.** It is not needed by this project
+> either — VirtualBox builds use BIOS and stock upstream ports.
+
 - **PR**: [hashicorp/packer-plugin-virtualbox#192](https://github.com/hashicorp/packer-plugin-virtualbox/pull/192)
 - **Author**: Bryan Belanger
 - **Fixes**: [#39](https://github.com/hashicorp/packer-plugin-virtualbox/issues/39) · refs [#20](https://github.com/hashicorp/packer-plugin-virtualbox/issues/20), [#145](https://github.com/hashicorp/packer-plugin-virtualbox/issues/145)

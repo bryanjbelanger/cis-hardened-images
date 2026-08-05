@@ -156,10 +156,11 @@ source "virtualbox-iso" "cis" {
   # graphical install first, and on a 4MB VMSVGA framebuffer that attempt wedges
   # the guest instead of falling back.
   #
-  # Three earlier hypotheses were wrong and are recorded so they are not retried:
-  # VirtualBox's EFI firmware refusing to boot (it boots; PR #192's port fix is
-  # confirmed correct by VBoxManage showing the ISO on port 1), the SATA/AHCI
-  # media interface, and the e1000 NIC (the hand-built VM used e1000 and worked).
+  # Earlier hypotheses, all wrong, recorded so they are not retried: VirtualBox's
+  # EFI firmware refusing to boot, the SATA/AHCI media interface, the e1000 NIC,
+  # and the ISO's SATA port. Verified directly — EFI with the ISO on port 13 and
+  # 32MB VRAM boots the graphical installer, which is the exact configuration
+  # upstream PR #192 claims cannot boot. See TROUBLESHOOTING.md.
   gfx_vram_size = 32
 
   # BIOS — VMware uses EFI, this does not, and the images are equivalent either
