@@ -37,12 +37,16 @@ TAG="${1:-v$(date +%Y.%m.%d)}"
     # which silently truncated the JSON.
     rel=$(ls build/packer/cis-${target}-*release.txt 2>/dev/null | head -1 || true)
     aud=$(ls build/packer/cis-${target}-*audit*.txt 2>/dev/null | head -1 || true)
+    # A missing field must read "unknown", never "". `grep ... | cut | tr || echo`
+    # cannot do that: the pipeline's exit status is tr's, which is 0 even when
+    # grep matched nothing, so the fallback never fired and absent provenance
+    # was published as an empty string instead of announcing itself.
     get() {
+      local v=""
       if [ -n "${rel:-}" ] && [ -f "$rel" ]; then
-        grep "^$1=" "$rel" 2>/dev/null | cut -d= -f2- | tr -d '"' || echo "unknown"
-      else
-        echo "unknown"
+        v=$(grep "^$1=" "$rel" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')
       fi
+      [ -n "$v" ] && printf '%s' "$v" || printf 'unknown'
     }
 
     [ $first -eq 1 ] || printf ',\n'
