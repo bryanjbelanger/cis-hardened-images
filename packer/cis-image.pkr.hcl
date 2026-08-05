@@ -247,7 +247,10 @@ build {
       "oscap xccdf eval --profile ${var.cis_profile} --report /root/cis-report.html --results-arf /root/cis-arf.xml /usr/share/xml/scap/ssg/content/${var.ssg_ds} > /root/audit.txt 2>&1 || true",
       "{ echo pass=$(grep '^Result' /root/audit.txt | grep -c pass); echo fail=$(grep '^Result' /root/audit.txt | grep -c fail); echo total=$(grep -c '^Rule' /root/audit.txt); echo mount_rules_passing=$(grep -A1 -E 'partition_for|mount_option' /root/audit.txt | grep '^Result' | grep -c pass); echo FAILURES:; grep -B1 '^Result.*fail' /root/audit.txt | grep '^Rule' | sed 's/.*content_rule_//'; } > /tmp/audit-summary.txt",
       "cp /root/cis-report.html /tmp/cis-report.html",
-      "chmod a+r /tmp/audit-summary.txt /tmp/cis-report.html",
+      # Guest state behind the rules that are still unexplained. Captured
+      # here because sealing locks root and the VM is then destroyed.
+      "{ echo '## authselect'; authselect current 2>&1 | head -20; echo; echo '## pam.d/system-auth'; ls -l /etc/pam.d/system-auth; grep -n pam_unix /etc/pam.d/system-auth /etc/pam.d/password-auth 2>&1; echo; echo '## cron'; rpm -q cronie cron 2>&1; systemctl is-enabled crond 2>&1; echo; echo '## aide'; ls -l /var/lib/aide/ 2>&1; } > /tmp/diagnostics.txt 2>&1 || true",
+      "chmod a+r /tmp/audit-summary.txt /tmp/cis-report.html /tmp/diagnostics.txt",
     ]
   }
 
@@ -265,6 +268,12 @@ build {
     direction   = "download"
     source      = "/tmp/cis-report.html"
     destination = "${var.output_dir}/${var.vm_name}-${source.type}-report.html"
+  }
+
+  provisioner "file" {
+    direction   = "download"
+    source      = "/tmp/diagnostics.txt"
+    destination = "${var.output_dir}/${var.vm_name}-${source.type}-diagnostics.txt"
   }
 
   # Seal, then verify its log, then lock — deliberately three steps. Merging

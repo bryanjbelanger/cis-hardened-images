@@ -82,10 +82,15 @@ audit
 aide
 chrony
 firewalld
-# cronie and openssl are listed explicitly because vendors differ on what
-# @^minimal-environment contains, and both are required:
-#   cronie  — CIS package_cron_installed. Rocky's minimal group includes it,
-#             AlmaLinux's does not.
+# cronie and openssl are listed explicitly so the image does not depend on what
+# a given vendor happens to put in @^minimal-environment:
+#   cronie  — CIS requires a cron daemon. NOTE: this is defensive only. It was
+#             added believing it would fix package_cron_installed on AlmaLinux;
+#             it does not, and cannot. Alma's SCAP content checks `rpm -q cron`
+#             — the DEBIAN package name — which no EL system can satisfy. The
+#             measured proof: Alma still fails that rule with cronie installed,
+#             while the sibling rule "Enable cron Service" passes. Every EL
+#             minimal install tested already had cronie. See README.
 #   openssl — used at seal time to hash the shipped default password. EL10
 #             minimal has neither the openssl CLI nor mkpasswd, so the lock
 #             step had no way to produce a $6$ hash.
