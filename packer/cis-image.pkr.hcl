@@ -163,13 +163,22 @@ source "virtualbox-iso" "cis" {
   # upstream PR #192 claims cannot boot. See TROUBLESHOOTING.md.
   gfx_vram_size = 32
 
-  # BIOS — VMware uses EFI, this does not, and the images are equivalent either
-  # way because the kickstart's `reqpart --add-boot` lets Anaconda create
-  # whatever the platform needs (an ESP under EFI, a biosboot partition under
-  # BIOS). Nothing in the CIS layout depends on the firmware. EFI would very
-  # likely work too now that VRAM is fixed, but BIOS is what has been verified
-  # end to end here and needs no patched plugin.
-  firmware = "bios"
+  # EFI, matching VMware. BIOS was tried while chasing the install hang and it
+  # works for EL — the kickstart's `reqpart --add-boot` lets Anaconda create
+  # whatever the platform needs — but it CANNOT work for Ubuntu: autoinstall's
+  # curtin storage config hardcodes a 512M ESP mounted at /boot/efi, and on a
+  # BIOS guest subiquity refuses with
+  #     autoinstall config did not create needed bootloader partition
+  # then crashes to a recovery shell. Packer then meets the live installer's
+  # sshd, which has no builder account, and reports an authentication error —
+  # a misleading symptom for a partitioning failure.
+  #
+  # EFI is safe here despite the earlier dead end: that was the 4MB VRAM bug,
+  # not firmware. Verified directly — EFI with the ISO on SATA port 13 and 32MB
+  # VRAM boots the graphical installer, which is also why stock upstream port
+  # placement is fine and no patched plugin is needed.
+  firmware      = "efi"
+  iso_interface = "sata"
 
   cd_files = ["${local.ks_dir}/"]
   cd_label = var.cd_label
