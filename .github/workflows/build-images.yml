@@ -117,7 +117,8 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
             --title "Hardened images $(date +%Y-%m-%d)" \
             --notes "CIS-hardened images. See README for first-login steps and accepted exceptions."
-          for f in build/packer/*.ova build/packer/*.sha256 build/packer/*audit*.txt build/packer/*seal*.log; do
+          ./make-manifest.sh "$TAG"
+          for f in build/packer/*.ova build/packer/*.sha256 build/packer/*audit*.txt build/packer/*seal*.log build/packer/*release.txt build/packer/manifest.json; do
             [ -f "$f" ] && gh release upload "$TAG" "$f" --clobber
           done
 

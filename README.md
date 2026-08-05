@@ -84,6 +84,26 @@ breaks older clients — take them only if you need them.
 
 ---
 
+## Knowing what an image actually is
+
+The release tag is a date, which says *when* an image was built and nothing
+about *what* is in it. Three things vary independently — the OS point release,
+the benchmark and SCAP content version, and package currency — and a date
+cannot express any of them. So every release carries the answer in two places:
+
+**`manifest.json`, attached to the release** — per asset: sha256, size, OS and
+point release, benchmark name and version, SCAP profile, datastream, SSG content
+version, FIPS mode, build date, and the audit pass/fail counts. Diff two
+manifests and you can see precisely what changed between releases.
+
+**`/etc/cis-image-release`, inside every image** — the same fields, so a running
+VM answers "what am I, and what was I hardened against?" without reference to
+where it came from. Modelled on `/etc/os-release`:
+
+```bash
+. /etc/cis-image-release && echo "$BENCHMARK ($SCAP_CONTENT_VERSION) — $AUDIT_PASS pass / $AUDIT_FAIL fail"
+```
+
 ## Release and asset naming (contract for automated consumers)
 
 Stable, predictable names — tooling resolves assets by exact name:

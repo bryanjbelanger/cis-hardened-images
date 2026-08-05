@@ -222,6 +222,19 @@ build {
   provisioner "shell" {
     execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
     script          = "seal.sh"
+    # Facts seal.sh cannot discover locally, for /etc/cis-image-release.
+    # AUDIT_* are read back out of the audit summary written just above.
+    environment_vars = [
+      "CIS_PROFILE=${var.cis_profile}",
+      "SSG_DS=${var.ssg_ds}",
+      "IMAGE_HYPERVISOR=${source.type}",
+    ]
+  }
+
+  provisioner "file" {
+    direction   = "download"
+    source      = "/tmp/cis-image-release"
+    destination = "${var.output_dir}/${var.vm_name}-${source.type}-release.txt"
   }
 
   provisioner "file" {

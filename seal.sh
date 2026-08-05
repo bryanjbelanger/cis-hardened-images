@@ -113,6 +113,50 @@ else
   log "AIDE BASELINE MISSING — do NOT ship this image (aide exit=$rc)"
 fi
 
+# ------------------------------------------------------------ image provenance
+# /etc/cis-image-release answers "what am I, and what was I hardened against?"
+# from INSIDE a running VM, with no reference to where it was downloaded from.
+# Modelled on /etc/os-release. The build passes CIS_PROFILE / SSG_DS / AUDIT_*
+# in the environment; everything else is discovered locally.
+log "writing /etc/cis-image-release"
+_ssg_version="unknown"
+if command -v rpm >/dev/null 2>&1; then
+  _ssg_version=$(rpm -q --qf '%{VERSION}-%{RELEASE}' scap-security-guide 2>/dev/null || echo unknown)
+elif command -v dpkg-query >/dev/null 2>&1; then
+  _ssg_version=$(dpkg-query -W -f='${Version}' ssg-debderived 2>/dev/null || echo staged)
+fi
+# The profile's own title carries the benchmark name and version, e.g.
+# "CIS Red Hat Enterprise Linux 9 Benchmark for Level 1 - Server".
+_benchmark="unknown"
+if command -v oscap >/dev/null 2>&1 && [ -n "${SSG_DS:-}" ]; then
+  _benchmark=$(oscap info "/usr/share/xml/scap/ssg/content/${SSG_DS}" 2>/dev/null \
+    | grep -B1 -F "${CIS_PROFILE:-}" | grep -i "^\s*Title:" | head -1 \
+    | sed 's/^[[:space:]]*Title:[[:space:]]*//' || echo unknown)
+fi
+. /etc/os-release 2>/dev/null || true
+cat > /etc/cis-image-release <<PROVENANCE
+IMAGE_NAME="CIS-hardened ${PRETTY_NAME:-unknown}"
+OS_ID="${ID:-unknown}"
+OS_VERSION="${VERSION_ID:-unknown}"
+OS_PRETTY_NAME="${PRETTY_NAME:-unknown}"
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+HYPERVISOR="${IMAGE_HYPERVISOR:-unknown}"
+FIPS_MODE="$(cat /proc/sys/crypto/fips_enabled 2>/dev/null || echo 0)"
+SCAP_PROFILE="${CIS_PROFILE:-unknown}"
+SCAP_DATASTREAM="${SSG_DS:-unknown}"
+SCAP_CONTENT_VERSION="${_ssg_version}"
+BENCHMARK="${_benchmark:-unknown}"
+AUDIT_PASS="${AUDIT_PASS:-unknown}"
+AUDIT_FAIL="${AUDIT_FAIL:-unknown}"
+AUDIT_NOTES="Known exceptions are documented at the project README."
+PROJECT_URL="https://github.com/bryanjbelanger/cis-hardened-images"
+PROVENANCE
+chmod 0644 /etc/cis-image-release
+# Copy somewhere the unprivileged build user can retrieve it for the manifest.
+cp /etc/cis-image-release /tmp/cis-image-release 2>/dev/null || true
+chmod 0644 /tmp/cis-image-release 2>/dev/null || true
+log "provenance: $(grep -c . /etc/cis-image-release) fields"
+
 # ------------------------------------------------------------- free-space zero
 # THE size lever. ovftool compresses the disk, but unallocated blocks still hold
 # deleted-file garbage that compresses badly: a measured export was 2.85 GB
