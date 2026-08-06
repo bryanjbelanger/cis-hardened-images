@@ -150,12 +150,42 @@ A bug found here was fixed and sent upstream —
 
 ## Supported targets
 
-Eight targets in `targets/*.env`, two provisioner families:
+Nine targets in `targets/*.env`, three provisioner families:
 
 | Provisioner | Targets | Installer | Delivery |
 |---|---|---|---|
 | `kickstart` | `rocky9` `rocky10` `alma9` `alma10` `cs9` `cs10` | Anaconda | ISO labeled **OEMDRV** |
 | `autoinstall` | `ubuntu2404` `ubuntu2204` | Subiquity | ISO labeled **CIDATA** + repacked installer ISO |
+| `preseed` | `debian12` | debian-installer | preseed embedded in a repacked ISO, named on the kernel cmdline |
+
+The delivery column is the real difference between them. Anaconda and Subiquity
+both discover their config from a volume LABEL; debian-installer discovers
+nothing on its own, so Debian's preseed has to be named as a boot argument —
+which is why `repack-iso.sh` exists.
+
+### Benchmark variants
+
+Each target can be built against either benchmark, with or without FIPS:
+
+```bash
+./build-packer.sh <target> <fusion|virtualbox> <no|yes> <cis|stig>
+```
+
+The variant is part of the artifact name — `cis-`, `cis-fips-`, `stig-`,
+`stig-fips-` — because it has to be. Without it a FIPS build and its non-FIPS
+sibling produce the identical file name, and a release upload publishes whichever
+finished last under a name claiming to be the other.
+
+| Variant | Profile | Notes |
+|---|---|---|
+| `cis` | CIS Level 1 Server | Default. What the published v2026.08.05 images are. |
+| `cis-fips` | CIS L1 Server + FIPS | FIPS enabled with `fips-mode-setup`, crypto policy reconciled. |
+| `stig` | DISA STIG | A much larger rule set: Rocky 9 scores 439/12 across 484 rules vs 274/2 across ~276 for CIS L1. |
+| `stig-fips` | DISA STIG + FIPS | Clears `sysctl_crypto_fips_enabled`. Measured: Rocky 9 goes 12 fails → 11. |
+
+**Debian has no STIG** — DISA publishes none and `ssg-debian12` carries only CIS
+and ANSSI profiles. `build-packer.sh debian12 ... stig` refuses immediately
+rather than failing inside oscap twenty minutes later.
 
 Each target file carries its ISO/checksum URLs, repo URLs, SSG datastream, CIS
 profile id, and provisioner. Render with `./render.sh <target|all>`, validate
