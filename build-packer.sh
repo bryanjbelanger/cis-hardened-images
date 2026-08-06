@@ -101,6 +101,19 @@ echo "==> packer build"
 # directory, and needing a datastream staged in — see prepare.sh.
 source "targets/${TARGET}.env"
 
+# FIPS is implemented ONLY for the kickstart family, via `fips-mode-setup` in
+# %post. There is no autoinstall or preseed equivalent here: render.sh's
+# fips_arg is assigned once, to "", and never set, so FIPS=yes on Ubuntu or
+# Debian silently produced an image named cis-fips-* with no FIPS in it.
+# Ubuntu's FIPS modules require an Ubuntu Pro subscription and are not
+# something this pipeline can enable; Debian has no equivalent either.
+if [ "$FIPS_MODE" = yes ] && [ "${PROVISIONER:-kickstart}" != kickstart ]; then
+  echo "ERROR: FIPS is not implemented for the ${PROVISIONER} family ($TARGET)." >&2
+  echo "       Only EL/kickstart targets can enable FIPS (fips-mode-setup)." >&2
+  echo "       Ubuntu FIPS requires an Ubuntu Pro subscription." >&2
+  exit 1
+fi
+
 # Refuse a STIG build for a target whose datastream has no STIG profile. Without
 # this the build installs, reboots, hardens and only then dies in oscap ~20
 # minutes in, with an error that does not name the real problem.
@@ -126,6 +139,7 @@ fi
 exec packer build -on-error=abort -only="$ONLY" \
   -var "vm_name=${VM_NAME}" \
   -var "variant=${VARIANT}" \
+  -var "profile_kind=${PROFILE_KIND}" \
   ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} \
   -var "render_suffix=-${HV}" ${EXTRA[@]+"${EXTRA[@]}"} \
   -var-file="packer/vars/${TARGET}.pkrvars.hcl" packer/

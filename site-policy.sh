@@ -52,14 +52,33 @@ log "cron.allow present, root:root 0640"
 # journald is the log backend (rsyslog must not run alongside it), this host
 # must not accept remote journal entries, and bluetooth has no role on a
 # server image. nftables is masked where ufw is the firewall.
-for unit in rsyslog.service systemd-journal-remote.socket bluetooth.service; do
+# rsyslog is where the two benchmarks genuinely DISAGREE, so the policy has to
+# follow the benchmark rather than pick one:
+#   CIS  wants journald and rsyslog not running together
+#        (ensure_journald_and_rsyslog_not_active_together) -> mask it.
+#   STIG wants rsyslog enabled (service_rsyslog_enabled)   -> enable it.
+# Applying the CIS choice to a STIG build costs a rule for no reason. Measured:
+# service_rsyslog_enabled failed on every STIG image built before this.
+if [ "${PROFILE_KIND:-cis}" = stig ]; then
+  systemctl unmask rsyslog.service >/dev/null 2>&1
+  if systemctl enable --now rsyslog.service >/dev/null 2>&1; then
+    log "rsyslog ENABLED (STIG requires it)"
+  else
+    log "WARNING: rsyslog could not be enabled — is it installed?"
+  fi
+else
+  systemctl mask rsyslog.service >/dev/null 2>&1
+  log "rsyslog masked (CIS requires journald alone)"
+fi
+
+for unit in systemd-journal-remote.socket bluetooth.service; do
   systemctl mask "$unit" >/dev/null 2>&1
 done
 if command -v ufw >/dev/null 2>&1; then
   systemctl mask nftables.service >/dev/null 2>&1
-  log "masked rsyslog, journal-remote, bluetooth, nftables"
+  log "masked journal-remote, bluetooth, nftables"
 else
-  log "masked rsyslog, journal-remote, bluetooth"
+  log "masked journal-remote, bluetooth"
 fi
 
 # NOTE: /var/log ownership is deliberately NOT touched here. CIS specifies

@@ -87,6 +87,13 @@ variable "render_suffix" {
   default = ""
 }
 
+variable "profile_kind" {
+  type    = string
+  default = "cis"
+  # cis | stig. site-policy.sh needs this: the two benchmarks disagree about
+  # rsyslog, so the policy must follow the benchmark rather than hardcode one.
+}
+
 variable "variant" {
   type    = string
   default = "cis"
@@ -278,9 +285,14 @@ build {
   # and BEFORE the second remediation, so that pass and the final audit both
   # see it. Without this an Ubuntu build scores 357/5 instead of 360/2.
   provisioner "shell" {
-    pause_before    = "45s"
-    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
-    script          = "site-policy.sh"
+    pause_before = "45s"
+    # {{.Vars}} is REQUIRED — without it Packer discards environment_vars
+    # entirely and site-policy.sh would silently fall back to the CIS branch on
+    # a STIG build. This exact omission once shipped provenance reading
+    # "unknown" for four fields.
+    execute_command  = "echo '${var.ssh_password}' | sudo -S env {{.Vars}} bash '{{.Path}}'"
+    script           = "site-policy.sh"
+    environment_vars = ["PROFILE_KIND=${var.profile_kind}"]
   }
 
   provisioner "shell" {
