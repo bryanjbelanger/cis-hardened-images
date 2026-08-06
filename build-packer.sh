@@ -100,6 +100,16 @@ echo "==> packer build"
 # Ubuntu (autoinstall) differs from EL only in the delivery volume, the config
 # directory, and needing a datastream staged in — see prepare.sh.
 source "targets/${TARGET}.env"
+
+# Refuse a STIG build for a target whose datastream has no STIG profile. Without
+# this the build installs, reboots, hardens and only then dies in oscap ~20
+# minutes in, with an error that does not name the real problem.
+if [ "$PROFILE_KIND" = stig ] && [ "${STIG_SUPPORTED:-yes}" = no ]; then
+  echo "ERROR: $TARGET has no STIG profile in ${SSG_DS:-its datastream}." >&2
+  echo "       DISA publishes no STIG for this distribution." >&2
+  exit 1
+fi
+
 EXTRA=()   # NOTE: expanded below as ${EXTRA[@]+"${EXTRA[@]}"} — macOS ships
            # bash 3.2, where "${EXTRA[@]}" on an EMPTY array trips `set -u`.
 if [ "${PROVISIONER:-kickstart}" = autoinstall ]; then
