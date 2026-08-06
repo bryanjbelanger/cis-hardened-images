@@ -472,6 +472,75 @@ does not mean a weaker image; it is a bigger benchmark.
 and ANSSI profiles. `build-packer.sh debian12 ... stig` refuses with that
 reason rather than failing inside oscap twenty minutes later.
 
+## STIG known-exceptions log
+
+The DISA STIG images (`stig-*`, `stig-fips-*`) are audited against a much larger
+rule set than CIS Level 1 — 484 rules for Rocky 9 versus roughly 276. Every rule
+that fails in a published STIG image is listed here, grouped by *why*, with what
+to do about it on a deployed host.
+
+Check any image against its own recorded profile:
+
+```bash
+sudo oscap xccdf eval --profile "$(grep ^SCAP_PROFILE= /etc/cis-image-release | cut -d\" -f2)" \
+  --report /root/stig-report.html \
+  "/usr/share/xml/scap/ssg/content/$(grep ^SCAP_DATASTREAM= /etc/cis-image-release | cut -d\" -f2)"
+```
+
+### Needs your infrastructure — no correct value can be shipped
+
+These fail because the right answer is a hostname on *your* network. They are the
+largest group, and every one is a deliberate omission rather than a miss.
+
+| Rule | What to do |
+|---|---|
+| `chronyd_server_directive`, `chronyd_specify_remote_server`, `chronyd_configure_local_socket` | Put your NTP sources in `/etc/chrony.conf` (`server <host> iburst`), then `sudo systemctl restart chronyd`. |
+| `network_configure_name_resolution` | Set your resolvers. On EL: `nmcli con mod <con> ipv4.dns "<ip> <ip>"`. Note this rule's result also varies with the build hypervisor's NAT, so it can differ between the VMware and VirtualBox image of the same target. |
+| `service_sssd_enabled`, `sssd_enable_certmap`, `sssd_enable_user_cert`, `sssd_enable_smartcards` | Join the host to your identity provider and configure SSSD. Smartcard/certificate mapping is meaningless without one. |
+| `auditd_offload_logs` (Ubuntu) | Point `audisp-remote` at your log host in `/etc/audit/audisp-remote.conf`, then enable it. |
+| `set_firewalld_default_zone` (EL10) | Choose the zone your site policy requires: `sudo firewall-cmd --set-default-zone=<zone>`. |
+
+### Accepted exceptions — deliberate for a distributable image
+
+| Rule | Why | What to do |
+|---|---|---|
+| `grub2_password`, `grub2_admin_username`, `grub2_uefi_password` | A bootloader password baked into an image every recipient downloads protects nothing, and does not defend a virtual disk that can simply be mounted. | `sudo grub2-setpassword` on EL after deploying; on Ubuntu use `grub-mkpasswd-pbkdf2` with `/etc/grub.d/40_custom`. |
+| `accounts_authorized_local_users` | The image ships a `builder` account, which is not in STIG's expected user list. | Remove or rename it once you have your own access: `sudo userdel -r builder`. |
+| `service_rsyslog_enabled` | rsyslog is masked because CIS requires journald to run alone, and these images share one hardening pipeline. STIG wants rsyslog enabled — the benchmarks genuinely disagree. Enabling it was measured and made results *worse* (see TROUBLESHOOTING.md), so the CIS choice stands. | If your policy follows STIG: `sudo systemctl unmask --now rsyslog`. |
+| `prevent_direct_root_logins` (Ubuntu) | Root is locked at seal time rather than by the mechanism this rule inspects. | Nothing — verify with `sudo passwd -S root`, which should report `L`. |
+
+### FIPS — fixed by the `stig-fips-*` images
+
+| Rule | Notes |
+|---|---|
+| `sysctl_crypto_fips_enabled`, `enable_fips_mode`, `system_booted_in_fips_mode`, `is_fips_mode_enabled` | **Use a `stig-fips-*` asset.** Measured on Rocky 9: 12 failures → 11 with FIPS on. On a deployed EL host: `sudo fips-mode-setup --enable && sudo reboot`. FIPS is EL-only here — Ubuntu's FIPS modules require an Ubuntu Pro subscription. |
+
+### False positives and upstream content bugs
+
+| Rule | Verdict |
+|---|---|
+| `installed_OS_is_vendor_supported` (Rocky) | Checks for a vendor-supported OS by Red Hat's definition; RHEL rebuilds do not match. Not applicable. |
+| `ensure_redhat_gpgkey_installed` (Rocky 10) | Checks for Red Hat's GPG key. Rocky ships its own vendor key — verify with `rpm -q gpg-pubkey`. |
+| `package_cron_installed` (AlmaLinux) | Alma's datastream checks for a package named `cron`, the Debian name; EL ships `cronie`. Cannot pass on any RPM system. Confirm with `rpm -q cronie`. |
+
+### Open — not yet explained
+
+| Rule | Status |
+|---|---|
+| `harden_sshd_macs_openssh_conf_crypto_policy`, `harden_sshd_macs_opensshserver_conf_crypto_policy` | Still fail with FIPS enabled, so not a FIPS gap. The STIG wants explicit MAC lists in the openssh crypto-policy drop-ins. Inspect `/etc/crypto-policies/back-ends/openssh.config` and set them explicitly if your policy requires it. |
+| `selinux_context_elevation_for_sudo` | Not investigated. |
+| `sysctl_user_max_user_namespaces_no_remediation` | The rule name says it: SSG ships no automated remediation, because the correct value depends on whether the host runs containers. Decide and set `user.max_user_namespaces` yourself. |
+| `require_singleuser_auth` (AlmaLinux 9) | Not investigated. |
+
+### AlmaLinux 10 STIG — known defect
+
+`stig-alma10-vmware` scores **370 pass / 100 fail**, of which 79 are
+`audit_rules_*`. The rules are written correctly to `/etc/audit/rules.d` but the
+kernel loads only 12 of them; Rocky 10 loads 113 from an identical file set and
+the same unit configuration. **Do not read that score as a hardening result for
+AlmaLinux 10** — use `stig-rocky10-*` for an EL10 STIG image. Investigation
+notes, including hypotheses already eliminated, are in `TROUBLESHOOTING.md`.
+
 Fixed in `%post` rather than excepted: `sshd_limit_user_access`
 (`AllowGroups wheel` — site policy, `builder` is in `wheel`),
 `ensure_journald_and_rsyslog_not_active_together` (rsyslog masked),
