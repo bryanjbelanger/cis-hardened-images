@@ -176,11 +176,34 @@ oscap xccdf eval --remediate \\
     - sh -c \"cp /cdrom/${SSG_DS} /target/usr/share/xml/scap/ssg/content/ || cp /media/*/${SSG_DS} /target/usr/share/xml/scap/ssg/content/\""
   fi
 
-  # Two provisioner families, same CIS intent:
+  # Three provisioner families, same CIS intent:
   #   kickstart   → EL (Anaconda), delivered on an OEMDRV-labeled ISO
   #   autoinstall → Ubuntu (Subiquity), delivered as user-data + meta-data on a
   #                 CIDATA-labeled ISO, and the installer ISO must ALSO be
   #                 repacked with `autoinstall` on the kernel cmdline (see README).
+  #   preseed     → Debian (debian-installer). d-i has NO volume-label discovery,
+  #                 so the preseed is embedded in a repacked ISO and named on the
+  #                 kernel cmdline (see repack-iso.sh).
+  if [[ ${PROVISIONER:-kickstart} == preseed ]]; then
+    local outdir="build/${tgt}${RENDER_SUFFIX:-}/preseed"
+    mkdir -p "$outdir"
+    OUTDIR_V=$outdir HOSTNAME_V=$HOSTNAME ROOT_PW_V=$PW_ROOT_BUILD BUILDER_PW_V=$PW_BUILDER \
+    python3 - "$tgt" << 'PRESEED_EOF'
+import os, sys
+tmpl = open("preseed.tmpl").read()
+for token, env in [("@HOSTNAME@","HOSTNAME_V"),("@ROOT_PW@","ROOT_PW_V"),
+                   ("@BUILDER_PW@","BUILDER_PW_V")]:
+    tmpl = tmpl.replace(token, os.environ[env])
+left = [t for t in ("@HOSTNAME@","@ROOT_PW@","@BUILDER_PW@") if t in tmpl]
+if left:
+    sys.exit("unsubstituted tokens remain: " + ",".join(left))
+out = os.environ["OUTDIR_V"] + "/preseed.cfg"
+open(out, "w").write(tmpl)
+print(f"rendered {out}")
+PRESEED_EOF
+    return
+  fi
+
   if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
     local outdir="build/${tgt}${RENDER_SUFFIX:-}/cidata"
     mkdir -p "$outdir"

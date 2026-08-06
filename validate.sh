@@ -18,6 +18,57 @@ check_one() {
   # shellcheck disable=SC1090
   source "targets/${tgt}.env"
 
+  if [[ ${PROVISIONER:-kickstart} == preseed ]]; then
+    local f="build/${tgt}${RENDER_SUFFIX:-}/preseed/preseed.cfg"
+    [[ -f $f ]] || { echo "✗ $tgt: $f not rendered"; return 1; }
+    # There is no offline grammar checker for preseed the way pykickstart is for
+    # kickstart, so this checks the things that have actually broken builds:
+    # unsubstituted tokens, a missing partman recipe, and the CIS mount options.
+    PRESEED_F="$f" TGT="$tgt" python3 << 'PRESEED_VAL'
+import os, re, sys
+f, tgt = os.environ["PRESEED_F"], os.environ["TGT"]
+text = open(f).read()
+problems = []
+
+left = re.findall(r"@[A-Z_]+@", text)
+if left:
+    problems.append("unsubstituted tokens: " + ",".join(sorted(set(left))))
+
+for req in ("partman-auto/expert_recipe", "passwd/username", "netcfg/get_hostname",
+            "partman/confirm", "debian-installer/add-kernel-opts"):
+    if req not in text:
+        problems.append("missing directive: " + req)
+
+# The CIS layout is the point of the recipe — check every filesystem is there.
+for mp in ("/boot", "/home", "/tmp", "/var", "/var/tmp", "/var/log", "/var/log/audit"):
+    if "mountpoint{ %s }" % mp not in text:
+        problems.append("recipe has no mountpoint for " + mp)
+
+# noexec/nosuid/nodev must survive onto the right filesystems.
+for mp, opts in (("/tmp", ("nodev","nosuid","noexec")),
+                 ("/var/tmp", ("nodev","nosuid","noexec")),
+                 ("/var/log", ("nodev","nosuid","noexec")),
+                 ("/var/log/audit", ("nodev","nosuid","noexec")),
+                 ("/home", ("nodev","nosuid"))):
+    seg = text.split("mountpoint{ %s }" % mp)
+    if len(seg) < 2:
+        continue
+    window = seg[1][:400]
+    for o in opts:
+        if "options/%s{" % o not in window:
+            problems.append("%s missing %s" % (mp, o))
+
+if problems:
+    print("✗ %s preseed:" % tgt)
+    for p in problems:
+        print("    - " + p)
+    sys.exit(1)
+print("✓ %s preseed: %d directives, CIS layout and mount options present"
+      % (tgt, len(re.findall(r"^d-i ", text, re.M))))
+PRESEED_VAL
+    return $?
+  fi
+
   if [[ ${PROVISIONER:-kickstart} == autoinstall ]]; then
     local f="build/${tgt}${RENDER_SUFFIX:-}/cidata/user-data"
     [[ -f $f ]] || { echo "✗ $tgt: not rendered ($f missing)"; fail=1; return; }

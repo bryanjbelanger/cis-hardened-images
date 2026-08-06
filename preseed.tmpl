@@ -1,0 +1,176 @@
+# Debian preseed for a CIS-hardened image. Rendered by render.sh.
+#
+# THIRD PROVISIONER FAMILY. Debian has neither Anaconda's kickstart nor Ubuntu's
+# Subiquity autoinstall — it uses debian-installer with a preseed file. The
+# differences that actually matter:
+#
+#   * NO auto-discovery by volume label. Anaconda finds a kickstart on an OEMDRV
+#     volume and Subiquity finds user-data on CIDATA; d-i finds nothing on its
+#     own. The preseed must be named on the KERNEL COMMAND LINE, which is why
+#     the installer ISO is repacked (see repack-iso.sh).
+#   * Partitioning is a partman "expert recipe", not a list of partitions. The
+#     syntax is positional and unforgiving; each entry is
+#     <min> <priority> <max> <fs> <method> <options> .
+#   * late_command runs INSIDE /target via in-target, and is the only hook that
+#     runs before first boot.
+#
+# Hardening itself is NOT done here. Like the Ubuntu targets, remediation runs
+# after first boot where apt has real sources — d-i's package selection comes
+# from the install media and cannot pull what SSG remediation needs.
+
+d-i debian-installer/locale string en_US.UTF-8
+d-i keyboard-configuration/xkb-keymap select us
+
+# Network. @HOSTNAME@ matches the other families' naming.
+d-i netcfg/choose_interface select auto
+d-i netcfg/get_hostname string @HOSTNAME@
+d-i netcfg/get_domain string localdomain
+d-i netcfg/hostname string @HOSTNAME@
+
+d-i mirror/country string manual
+d-i mirror/http/hostname string deb.debian.org
+d-i mirror/http/directory string /debian
+d-i mirror/http/proxy string
+
+d-i clock-setup/utc boolean true
+d-i time/zone string UTC
+d-i clock-setup/ntp boolean true
+
+# Accounts. Root is given a password for the build only; seal.sh locks it and
+# expires builder exactly as on the other families.
+d-i passwd/root-login boolean true
+d-i passwd/root-password password @ROOT_PW@
+d-i passwd/root-password-again password @ROOT_PW@
+d-i passwd/user-fullname string Build/audit account
+d-i passwd/username string builder
+d-i passwd/user-password password @BUILDER_PW@
+d-i passwd/user-password-again password @BUILDER_PW@
+d-i user-setup/allow-password-weak boolean true
+d-i user-setup/encrypt-home boolean false
+
+# CIS 1.1.x partition layout, as an expert recipe. Same filesystems and mount
+# options as the EL and Ubuntu targets so the three families stay comparable.
+#
+# Sizes are <min> <priority> <max> in MB; priority only orders growth. 1000%
+# on the last entry lets it take the remainder.
+d-i partman-auto/method string lvm
+d-i partman-auto-lvm/guided_size string max
+d-i partman-lvm/device_remove_lvm boolean true
+d-i partman-md/device_remove_md boolean true
+d-i partman-lvm/confirm boolean true
+d-i partman-lvm/confirm_nooverwrite boolean true
+d-i partman-auto/choose_recipe select cis
+d-i partman-auto/expert_recipe string                         \
+      cis ::                                                  \
+              538 538 1075 free                               \
+                      $iflabel{ gpt }                         \
+                      $reusemethod{ }                         \
+                      method{ efi } format{ }                 \
+              .                                               \
+              1024 1024 1024 ext4                             \
+                      $primary{ } $bootable{ }                \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /boot }                     \
+              .                                               \
+              8192 8192 8192 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ root }                         \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ / }                         \
+              .                                               \
+              1024 1024 1024 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ home }                         \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /home }                     \
+                      options/nodev{ nodev }                  \
+                      options/nosuid{ nosuid }                \
+              .                                               \
+              1024 1024 1024 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ tmp }                          \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /tmp }                      \
+                      options/nodev{ nodev }                  \
+                      options/nosuid{ nosuid }                \
+                      options/noexec{ noexec }                \
+              .                                               \
+              4096 4096 4096 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ var }                          \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /var }                      \
+                      options/nodev{ nodev }                  \
+                      options/nosuid{ nosuid }                \
+              .                                               \
+              1024 1024 1024 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ vartmp }                       \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /var/tmp }                  \
+                      options/nodev{ nodev }                  \
+                      options/nosuid{ nosuid }                \
+                      options/noexec{ noexec }                \
+              .                                               \
+              2048 2048 2048 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ varlog }                       \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /var/log }                  \
+                      options/nodev{ nodev }                  \
+                      options/nosuid{ nosuid }                \
+                      options/noexec{ noexec }                \
+              .                                               \
+              1024 1024 1024 ext4                             \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ varlogaudit }                  \
+                      method{ format } format{ }              \
+                      use_filesystem{ } filesystem{ ext4 }    \
+                      mountpoint{ /var/log/audit }            \
+                      options/nodev{ nodev }                  \
+                      options/nosuid{ nosuid }                \
+                      options/noexec{ noexec }                \
+              .                                               \
+              2048 2048 2048 linux-swap                       \
+                      $defaultignore{ } $lvmok{ }             \
+                      lv_name{ swap }                         \
+                      method{ swap } format{ }                \
+              .
+d-i partman-partitioning/confirm_write_new_label boolean true
+d-i partman/choose_partition select finish
+d-i partman/confirm boolean true
+d-i partman/confirm_nooverwrite boolean true
+d-i partman-basicfilesystems/no_swap boolean false
+
+# Minimal install. No desktop, no recommends — the SCAP toolchain and the guest
+# agent arrive post-boot from prepare.sh, for the same reason as Ubuntu.
+tasksel tasksel/first multiselect standard
+d-i pkgsel/include string openssh-server sudo
+d-i pkgsel/upgrade select none
+d-i pkgsel/install-language-support boolean false
+popularity-contest popularity-contest/participate boolean false
+
+d-i grub-installer/only_debian boolean true
+d-i grub-installer/with_other_os boolean false
+d-i grub-installer/bootdev string default
+
+# CIS 1.3.1 / 4.1.1.x: auditing active from first boot, matching the EL and
+# Ubuntu targets' kernel arguments.
+d-i debian-installer/add-kernel-opts string audit=1 audit_backlog_limit=8192
+
+d-i finish-install/reboot_in_progress note
+
+# builder needs passwordless sudo for the build only. lock-accounts.sh expires
+# the account and seal.sh locks root, so this does not survive into the image
+# as a usable path.
+d-i preseed/late_command string \
+    in-target sh -c 'echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-builder'; \
+    in-target chmod 0440 /etc/sudoers.d/90-builder; \
+    in-target systemctl enable ssh
