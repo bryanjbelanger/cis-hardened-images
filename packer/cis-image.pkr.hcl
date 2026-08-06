@@ -287,6 +287,19 @@ build {
     execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
     inline = [
       "oscap xccdf eval --remediate --profile ${var.cis_profile} --report /root/remediation2.html /usr/share/xml/scap/ssg/content/${var.ssg_ds} || [ $? -eq 2 ]",
+      # The audit immutable flag MUST load last. augenrules concatenates
+      # /etc/audit/rules.d in LEXICAL order, and SSG writes the `-e 2` rule to
+      # immutable.rules — which sorts 7th of 13 on AlmaLinux 10. Everything
+      # after it (logins, modules, perm_mod, privileged, setgid, setuid) is
+      # rejected by the kernel because the config is already locked, so the
+      # rules sit correctly on disk while `auditctl -l` shows 12 active and 79
+      # audit_rules_* checks fail. Measured: 370 pass / 100 fail.
+      #
+      # Renaming it to sort last is the whole fix. Rocky 10 never hit this only
+      # because its content wrote the rules in a different order.
+      "if [ -f /etc/audit/rules.d/immutable.rules ]; then mv -f /etc/audit/rules.d/immutable.rules /etc/audit/rules.d/zz-immutable.rules; fi",
+      "for f in /etc/audit/rules.d/*.rules; do case \"$(basename \"$f\")\" in zz-*) ;; *) grep -q -- '-e 2' \"$f\" && mv -f \"$f\" \"/etc/audit/rules.d/zz-$(basename \"$f\")\" ;; esac; done",
+      "augenrules --load 2>&1 | tail -3 || true",
     ]
   }
 
