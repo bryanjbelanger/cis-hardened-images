@@ -52,33 +52,30 @@ log "cron.allow present, root:root 0640"
 # journald is the log backend (rsyslog must not run alongside it), this host
 # must not accept remote journal entries, and bluetooth has no role on a
 # server image. nftables is masked where ufw is the firewall.
-# rsyslog is where the two benchmarks genuinely DISAGREE, so the policy has to
-# follow the benchmark rather than pick one:
-#   CIS  wants journald and rsyslog not running together
-#        (ensure_journald_and_rsyslog_not_active_together) -> mask it.
-#   STIG wants rsyslog enabled (service_rsyslog_enabled)   -> enable it.
-# Applying the CIS choice to a STIG build costs a rule for no reason. Measured:
-# service_rsyslog_enabled failed on every STIG image built before this.
-if [ "${PROFILE_KIND:-cis}" = stig ]; then
-  systemctl unmask rsyslog.service >/dev/null 2>&1
-  if systemctl enable --now rsyslog.service >/dev/null 2>&1; then
-    log "rsyslog ENABLED (STIG requires it)"
-  else
-    log "WARNING: rsyslog could not be enabled — is it installed?"
-  fi
-else
-  systemctl mask rsyslog.service >/dev/null 2>&1
-  log "rsyslog masked (CIS requires journald alone)"
-fi
-
-for unit in systemd-journal-remote.socket bluetooth.service; do
+# rsyslog: masked, for BOTH benchmarks.
+#
+# CIS requires journald and rsyslog not to run together
+# (ensure_journald_and_rsyslog_not_active_together). STIG has
+# service_rsyslog_enabled, so enabling it for STIG builds looked obviously
+# right — and MEASURING it showed the opposite:
+#
+#   rocky10 STIG, rsyslog masked   457 pass / 14 fail, rule PASSES
+#   rocky10 STIG, rsyslog enabled  456 pass / 15 fail, rule FAILS
+#   rocky9  STIG, rsyslog masked   439 pass / 12 fail
+#   rocky9  STIG, rsyslog enabled  438 pass / 13 fail
+#
+# Enabling rsyslog introduced the very failure it was meant to remove, on both
+# targets, with the guest confirmed `enabled` and `active` at audit time. Why
+# the rule reports fail in that state is not understood; until it is, the
+# measured-better configuration wins over the intuitive one.
+for unit in rsyslog.service systemd-journal-remote.socket bluetooth.service; do
   systemctl mask "$unit" >/dev/null 2>&1
 done
 if command -v ufw >/dev/null 2>&1; then
   systemctl mask nftables.service >/dev/null 2>&1
-  log "masked journal-remote, bluetooth, nftables"
+  log "masked rsyslog, journal-remote, bluetooth, nftables"
 else
-  log "masked journal-remote, bluetooth"
+  log "masked rsyslog, journal-remote, bluetooth"
 fi
 
 # NOTE: /var/log ownership is deliberately NOT touched here. CIS specifies
