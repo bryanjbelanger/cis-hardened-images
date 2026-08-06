@@ -103,9 +103,14 @@ for line in open(os.path.join(work, "ovas.tsv")):
     rel = read_kv(find("release.txt", target, hv_tag, variant) or "")
     aud = read_audit(find("audit.txt", target, hv_tag, variant) or "")
 
+    # The checksum is named after the ARTIFACT (stig-rocky9-vmware-amd64.ova
+    # .sha256); evidence files are named after the VM
+    # (cis-rocky9-stig-vmware-iso-audit.txt). find() searches the VM naming, so
+    # using it here produced sha256="unknown" for every STIG image while every
+    # other field resolved. The checksum name is derivable — do not search.
     sha = "unknown"
-    shafile = find(".ova.sha256", target, hv_tag, variant)
-    if shafile and os.path.exists(shafile):
+    shafile = os.path.join(work, name + ".sha256")
+    if os.path.exists(shafile):
         sha = open(shafile).read().split()[0]
 
     def g(k):
