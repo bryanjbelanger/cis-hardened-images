@@ -418,6 +418,29 @@ sudo oscap xccdf eval --profile "$(grep ^SCAP_PROFILE= /etc/cis-image-release | 
 | `service_nftables_enabled` (Ubuntu) | **Unsatisfiable pair** | The CIS Ubuntu profile contains BOTH `service_nftables_enabled` and `service_nftables_disabled` — the benchmark expects you to pick one firewall. ufw is Ubuntu's default, so nftables is masked and exactly one of the pair fails whichever way you go. | **Decide, do not chase the rule.** Keep ufw (`sudo ufw status`), or switch: `sudo systemctl unmask --now nftables && sudo ufw disable`. |
 | `accounts_password_pam_unix_authtok` (AlmaLinux 10) | **Open — not yet diagnosed** | The rule wants `use_authtok` on the `pam_unix.so` password line. Its remediation edits `/etc/pam.d/system-auth` directly, which EL10 manages through authselect, so the edit may not survive. Root cause not confirmed. | **Check, and fix via authselect if your policy requires it.** Inspect with `grep pam_unix /etc/pam.d/system-auth`. If `use_authtok` is absent, add it in an authselect custom profile rather than editing the file directly (`authselect create-profile`, edit, `authselect select custom/<name>`, `authselect apply-changes`) — a direct edit will be reverted. |
 
+### STIG profile exceptions
+
+STIG images (`stig-*` assets) are audited against the DISA STIG profile, a much
+larger rule set than CIS Level 1 — Rocky 9 scores **439 pass / 12 fail across
+484 rules**, versus 274/2 across ~276 for CIS L1. A higher fail *count* here
+does not mean a weaker image; it is a bigger benchmark.
+
+| Rule | Status | Why it fails | What you should do |
+|---|---|---|---|
+| `sysctl_crypto_fips_enabled`, `harden_sshd_macs_openssh_conf_crypto_policy`, `harden_sshd_macs_opensshserver_conf_crypto_policy` | **Fixed by the FIPS variant** | STIG expects FIPS mode; the plain `stig` image does not enable it. | **Use the `stig-fips-*` asset**, which enables FIPS at build time. On a deployed non-FIPS host: `sudo fips-mode-setup --enable && sudo reboot`. |
+| `network_configure_name_resolution` | **Site-specific** | Requires real resolvers; there is no correct value to ship. | Set your DNS servers in `/etc/resolv.conf` (or via NetworkManager) and re-audit. |
+| `chronyd_server_directive` | **Site-specific** | Requires your NTP source. | Add `server <your-ntp-host> iburst` to `/etc/chrony.conf`, then `sudo systemctl restart chronyd`. |
+| `sssd_enable_certmap` | **Site-specific** | Smart-card certificate mapping needs an identity domain. | Configure `sssd` certmap for your domain, or accept if you do not use smart cards. |
+| `grub2_password`, `grub2_admin_username` | **Accepted exception** | Same reasoning as CIS — a bootloader password shared by every recipient protects nothing. | `sudo grub2-setpassword` after deploying. |
+| `installed_OS_is_vendor_supported` | **False positive** | The RHEL STIG checks for Red Hat vendor support; this is a rebuild. | Nothing. Same class as `ensure_redhat_gpgkey_installed`. |
+| `accounts_authorized_local_users` | **Build artifact** | The `builder` account is not in STIG's expected user list. | Remove or rename `builder` once you have your own admin account. |
+| `sysctl_user_max_user_namespaces_no_remediation` | **Manual by design** | The rule name says it: SSG ships no automated remediation, because disabling user namespaces breaks containers. | Decide per host. Set `user.max_user_namespaces=0` only if nothing on the box needs them. |
+| `selinux_context_elevation_for_sudo` | **Open — not yet diagnosed** | Not investigated. Recorded rather than omitted. | Inspect `sudo -V | grep -i selinux` and your sudoers `TYPE`/`ROLE` settings if your policy requires it. |
+
+**No STIG for Debian.** DISA publishes none, and `ssg-debian12` carries only CIS
+and ANSSI profiles. `build-packer.sh debian12 ... stig` refuses with that
+reason rather than failing inside oscap twenty minutes later.
+
 Fixed in `%post` rather than excepted: `sshd_limit_user_access`
 (`AllowGroups wheel` — site policy, `builder` is in `wheel`),
 `ensure_journald_and_rsyslog_not_active_together` (rsyslog masked),
