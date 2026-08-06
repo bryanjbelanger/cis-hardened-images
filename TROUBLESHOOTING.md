@@ -4,6 +4,55 @@ Hard-won findings, written down so they are not rediscovered the expensive way.
 
 ---
 
+## AlmaLinux 10 + STIG: audit rules do not load at boot
+
+**Status: unresolved. Alma 10 STIG is NOT publishable. Three hypotheses tested
+and eliminated — read this before forming a fourth.**
+
+### Symptom
+
+AlmaLinux 10 STIG scores **370 pass / 100 fail**, of which **79 are
+`audit_rules_*`**. Rocky 10 STIG, same EL10 base and the same profile, scores
+457/14 with **zero** audit_rules failures. Alma 10 **CIS** is unaffected (302/6).
+
+### What is established
+
+From the build's own diagnostics, not inference:
+
+```
+rulesd       = 13 rule files present, written correctly by remediation
+augenrules --check = "No change"      # rules.d compiles to audit.rules fine
+active_rules = 12                     # kernel has only 12
+enabled      = 1                      # -e 2 never applied
+```
+
+The rules are correct on disk and absent from the running kernel config. The
+audit checks the running config, so they fail. `augenrules --load` run by hand
+during the build **succeeds** and reports normal status — and after the next
+reboot the kernel is back to 12 rules. So loading works on demand and fails at
+boot.
+
+### Eliminated — do not retry these
+
+| Hypothesis | Verdict | Evidence |
+|---|---|---|
+| Rules never reloaded after remediation | **Wrong** | Added a reboot between remediation and audit. No change: still 370/100. |
+| `-e 2` loading mid-sequence and locking the rest | **Wrong** | `augenrules` concatenates lexically and `immutable.rules` did sort 7th of 13, which looked decisive. Renamed it to `zz-immutable.rules` (confirmed last in the listing) and ran `augenrules --load`. Still 370/100, still 12 active. |
+| The load itself erroring partway | **Wrong** | `augenrules --load` output shows normal audit status, no rule rejected. |
+
+### Next step
+
+The evidence points at **boot-time** loading specifically. The next diagnostic —
+already added — reports `systemctl is-enabled audit-rules` and `auditd`. If
+`audit-rules.service` is disabled or masked on Alma 10, nothing loads rules.d at
+boot and everything above follows. Check that before anything else.
+
+Note the reboot added while chasing this is worth keeping regardless: auditing
+the system as it will actually boot is right on its own merits, and it is what
+made the boot-versus-on-demand distinction visible at all.
+
+---
+
 ## VirtualBox on EL: Guest Additions will not compile
 
 **Status: blocked upstream, and expected to un-block on its own. Re-test when
