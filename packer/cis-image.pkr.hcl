@@ -290,6 +290,22 @@ build {
     ]
   }
 
+  # SECOND reboot, between remediation and the audit. Not cosmetic: oscap writes
+  # audit rules into /etc/audit/rules.d/ but does not load them, and the audit
+  # checks the RUNNING configuration. Measured on AlmaLinux 10 STIG — 13 rule
+  # files on disk including `-e 2`, yet `auditctl -l` showed only 12 active rules
+  # and 79 audit_rules_* checks failed (370 pass / 100 fail). Rocky 10 escaped it
+  # only by writing its rules before the first reboot.
+  #
+  # Rebooting here means the audit measures the system as it will actually boot,
+  # which is the state the image ships in — and it applies to every rule whose
+  # remediation needs a restart, not just the audit ones.
+  provisioner "shell" {
+    execute_command   = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
+    inline            = ["systemctl reboot"]
+    expect_disconnect = true
+  }
+
   # Final audit BEFORE sealing — sealing locks root, after which nothing can be
   # inspected. The summary is pulled back to the host as the build's evidence.
   provisioner "shell" {
