@@ -25,20 +25,67 @@ automated consumers can verify without the sidecar file.
 - **VMware Fusion / Workstation** — File → Import, select the `.ova`
 - **VirtualBox** — File → Import Appliance, select the `.ova`
 
-### 3. First login
+### 3. Get a shell
 
-| | |
-|---|---|
-| Username | `builder` |
-| Password | `cis-hardened` |
-| root | **locked** — use `sudo` |
+Root is locked and there is no guest agent on EL VirtualBox images, so **SSH is
+the way in**. The account is `builder`, the password is `cis-hardened`, and it is
+expired on purpose — you are forced to change it the first time you log in.
 
-**The password is expired on purpose.** You are forced to change it at first
-login. This is a public image; that default is known to everyone until you
-change it, so change it before putting the VM on a network you care about.
+#### VirtualBox
 
-SSH is restricted to the `wheel` group (EL) or `sudo` group (Ubuntu) — add your
-own accounts to that group, or edit `/etc/ssh/sshd_config.d/49-cis-access.conf`.
+The imported VM uses NAT, which gives the guest no inbound address. Forward a
+host port to its SSH port first:
+
+```bash
+VBoxManage modifyvm "<vm-name>" --natpf1 "ssh,tcp,127.0.0.1,2222,,22"
+VBoxManage startvm  "<vm-name>" --type headless
+ssh -p 2222 builder@127.0.0.1
+```
+
+If port 2222 is taken, pick another — only the host side matters. Remove the rule
+later with `--natpf1 delete ssh`.
+
+#### VMware Fusion / Workstation
+
+The guest gets an address on the NAT network directly:
+
+```bash
+vmrun getGuestIPAddress "<path to .vmx>" -wait
+ssh builder@<that-ip>
+```
+
+#### First login looks like this
+
+```
+builder@127.0.0.1's password:            <- cis-hardened
+You are required to change your password immediately (administrator enforced)
+Current password:                        <- cis-hardened again
+New password:                            <- your new password
+Retype new password:
+```
+
+SSH then drops the connection — that is normal. Reconnect with the new password.
+
+### 3a. sudo
+
+`builder` is in the admin group (`wheel` on EL, `sudo` on Ubuntu) and sudo
+**prompts for your password** — the one you just set, not the default:
+
+```bash
+sudo -v          # verify sudo works
+sudo dnf update  # EL
+sudo apt update  # Ubuntu/Debian
+```
+
+There is no passwordless sudo on EL or Ubuntu images. If `sudo` says the account
+is not in the sudoers file, you are logged in as something other than `builder`.
+
+#### If SSH refuses you
+
+SSH is restricted to the admin group by
+`/etc/ssh/sshd_config.d/49-cis-access.conf` (`AllowGroups wheel` or
+`AllowGroups sudo`). Any account you add later must be in that group, or be added
+to the `AllowGroups` line, or it will be rejected even with a correct password.
 
 ### 4. Do these before production use
 
