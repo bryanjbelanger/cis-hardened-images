@@ -67,29 +67,44 @@ def read_audit(path):
                 d[m.group(1)] = int(m.group(2))
     return d
 
-def find(suffix, target, hv):
-    """Assets are named cis-<target>-<hv>-iso-<kind>. Match on both so a
-    target built for two hypervisors cannot pick up the other's evidence."""
+def find(suffix, target, hv, variant):
+    """Evidence is named after the VM: cis-<target>[-stig][-fips]-<hv>-iso-<kind>.
+    Match target, hypervisor AND variant, or a STIG image would happily pick up
+    its CIS sibling's audit numbers and report them as its own."""
+    want = []
+    if variant.startswith("stig"):
+        want.append("-stig")
+    if variant.endswith("fips"):
+        want.append("-fips")
     for f in sorted(os.listdir(work)):
-        if f.startswith(f"cis-{target}-") and f.endswith(suffix) and hv in f:
+        if not (f.startswith(f"cis-{target}-") and f.endswith(suffix) and hv in f):
+            continue
+        if all(w in f for w in want) and \
+           ("-stig" in f) == variant.startswith("stig") and \
+           ("-fips" in f) == variant.endswith("fips"):
             return os.path.join(work, f)
     return None
 
 images = []
 for line in open(os.path.join(work, "ovas.tsv")):
     name, size = line.rstrip("\n").split("\t")
-    m = re.match(r"^cis-([a-z0-9]+)-(vmware|virtualbox)-([a-z0-9]+)\.ova$", name)
+    # Assets are <variant>-<target>-<hypervisor>-<arch>.ova, where variant is
+    # cis | cis-fips | stig | stig-fips. The variant MUST be part of the match:
+    # an earlier version anchored on "cis-" and would have silently skipped
+    # every STIG asset, publishing a manifest that omitted half the release
+    # while looking complete.
+    m = re.match(r"^(cis|cis-fips|stig|stig-fips)-([a-z0-9]+)-(vmware|virtualbox)-([a-z0-9]+)\.ova$", name)
     if not m:
         print(f"    WARNING: unrecognised asset name, skipping: {name}")
         continue
-    target, hv, arch = m.groups()
+    variant, target, hv, arch = m.groups()
     hv_tag = "vmware" if hv == "vmware" else "virtualbox"
 
-    rel = read_kv(find("release.txt", target, hv_tag) or "")
-    aud = read_audit(find("audit.txt", target, hv_tag) or "")
+    rel = read_kv(find("release.txt", target, hv_tag, variant) or "")
+    aud = read_audit(find("audit.txt", target, hv_tag, variant) or "")
 
     sha = "unknown"
-    shafile = find(".ova.sha256", target, hv_tag)
+    shafile = find(".ova.sha256", target, hv_tag, variant)
     if shafile and os.path.exists(shafile):
         sha = open(shafile).read().split()[0]
 
@@ -102,6 +117,8 @@ for line in open(os.path.join(work, "ovas.tsv")):
         "sha256": sha,
         "size_bytes": int(size),
         "target": target,
+        "variant": variant,
+        "benchmark_family": "stig" if variant.startswith("stig") else "cis",
         "hypervisor": hv,
         "arch": arch,
         "os": g("OS_PRETTY_NAME"),
@@ -118,7 +135,7 @@ for line in open(os.path.join(work, "ovas.tsv")):
                   if aud else None),
     })
 
-images.sort(key=lambda i: (i["target"], i["hypervisor"]))
+images.sort(key=lambda i: (i["variant"], i["target"], i["hypervisor"]))
 json.dump({
     "release": tag,
     "generated": __import__("datetime").datetime.now(
