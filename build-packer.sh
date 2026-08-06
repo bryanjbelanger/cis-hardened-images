@@ -11,9 +11,22 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-TARGET="${1:?usage: build-packer.sh <target> [fusion|virtualbox] [fips]}"
+TARGET="${1:?usage: build-packer.sh <target> [fusion|virtualbox] [fips] [cis|stig]}"
 HV="${2:-fusion}"
 FIPS_MODE="${3:-no}"
+# Benchmark to remediate and audit against. CIS is the default; STIG is the DISA
+# profile, present in the same datastreams under the plain id
+# xccdf_org.ssgproject.content_profile_stig.
+PROFILE_KIND="${4:-cis}"
+case "$PROFILE_KIND" in
+  cis)  ;;
+  stig) ;;
+  *) echo "profile must be cis|stig" >&2; exit 1 ;;
+esac
+# VARIANT names the artifact, and must distinguish every combination — a FIPS
+# build previously produced the SAME asset name as its non-FIPS sibling.
+VARIANT="$PROFILE_KIND"
+if [ "$FIPS_MODE" = yes ]; then VARIANT="${VARIANT}-fips"; fi
 VMRUN="/Applications/VMware Fusion.app/Contents/Public/vmrun"
 
 case "$HV" in
@@ -32,6 +45,7 @@ VM_NAME=$(grep -E '^\s*vm_name' "packer/vars/${TARGET}.pkrvars.hcl" | cut -d'"' 
 # they run at the same time and destroy each other — the non-FIPS rocky9/fusion
 # build and its FIPS sibling both failed this way on the first parallel CI run.
 # Serial builds never exposed it.
+if [ "$PROFILE_KIND" != cis ]; then VM_NAME="${VM_NAME}-${PROFILE_KIND}"; fi
 if [ "$FIPS_MODE" = yes ]; then VM_NAME="${VM_NAME}-fips"; fi
 OUT_DIR="build/packer/${VM_NAME}-${OUT_SUFFIX}"
 
@@ -79,7 +93,7 @@ rm -rf "$OUT_DIR"
 
 echo "==> rendering (DRIVER=packer, HYPERVISOR=$HYPERVISOR, FIPS=$FIPS_MODE)"
 export RENDER_SUFFIX="-${HV}"
-DRIVER=packer HYPERVISOR="$HYPERVISOR" FIPS="$FIPS_MODE" ./render.sh "$TARGET"
+DRIVER=packer HYPERVISOR="$HYPERVISOR" FIPS="$FIPS_MODE" PROFILE="$PROFILE_KIND" ./render.sh "$TARGET"
 ./validate.sh "$TARGET"
 
 echo "==> packer build"
@@ -94,7 +108,14 @@ if [ "${PROVISIONER:-kickstart}" = autoinstall ]; then
   [ -f "$DS" ] && EXTRA+=(-var "staged_datastream=$(pwd)/$DS")
 fi
 
+PROFILE_ARGS=()
+if [ "$PROFILE_KIND" = stig ]; then
+  PROFILE_ARGS=(-var "cis_profile=xccdf_org.ssgproject.content_profile_stig")
+fi
+
 exec packer build -on-error=abort -only="$ONLY" \
   -var "vm_name=${VM_NAME}" \
+  -var "variant=${VARIANT}" \
+  ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} \
   -var "render_suffix=-${HV}" ${EXTRA[@]+"${EXTRA[@]}"} \
   -var-file="packer/vars/${TARGET}.pkrvars.hcl" packer/

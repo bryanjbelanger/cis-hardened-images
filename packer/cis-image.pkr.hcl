@@ -86,6 +86,15 @@ variable "render_suffix" {
   type    = string
   default = ""
 }
+
+variable "variant" {
+  type    = string
+  default = "cis"
+  # Names the artifact: cis | cis-fips | stig | stig-fips. This MUST be in the
+  # asset name. Without it a FIPS build and its non-FIPS sibling produce the
+  # identical file name, and `gh release upload --clobber` silently publishes
+  # whichever finished last under a name that claims to be the other.
+}
 variable "output_dir" {
   type    = string
   default = "build/packer"
@@ -99,8 +108,8 @@ locals {
   #   * hypervisor family in the name — the images genuinely differ (guest
   #     agent), so one release carries both and they must not collide.
   #   * arch suffix so adding arm64 later changes nothing else.
-  artifact_vmware     = "cis-${var.target}-vmware-amd64.ova"
-  artifact_virtualbox = "cis-${var.target}-virtualbox-amd64.ova"
+  artifact_vmware     = "${var.variant}-${var.target}-vmware-amd64.ova"
+  artifact_virtualbox = "${var.variant}-${var.target}-virtualbox-amd64.ova"
 
   # render.sh writes the kickstart here; Packer turns the directory into the
   # OEMDRV ISO itself, so make_iso is no longer needed for EL targets.

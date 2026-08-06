@@ -26,6 +26,15 @@ render_one() {
   # algorithms.
   local fips_eff="${fips_cli:-${FIPS:-no}}"
 
+  # PROFILE=stig swaps the benchmark. The id is the same plain string in every
+  # product's datastream, so it is computed here rather than duplicated into all
+  # eight target files. This MUST happen before the templates are rendered: the
+  # kickstart runs its own %post remediation, and leaving CIS_PROFILE untouched
+  # would harden the guest to CIS in %post and then audit it against STIG.
+  if [[ ${PROFILE:-cis} == stig ]]; then
+    CIS_PROFILE="xccdf_org.ssgproject.content_profile_stig"
+  fi
+
   # HYPERVISOR selects the guest agent — the daemon each hypervisor's management
   # tooling talks to. Without the right one the MCP server for that hypervisor
   # cannot run guest operations against the image at all, which is the whole
