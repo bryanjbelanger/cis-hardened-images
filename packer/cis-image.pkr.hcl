@@ -334,6 +334,12 @@ build {
   # Final audit BEFORE sealing — sealing locks root, after which nothing can be
   # inspected. The summary is pulled back to the host as the build's evidence.
   provisioner "shell" {
+    # pause_before covers a race the reboot above introduced: Packer reconnects
+    # as soon as SSH answers, which can be a sshd that is still going down. The
+    # audit then dies with "Script disconnected unexpectedly" ~22 minutes into a
+    # build. Seen on VirtualBox first, whose port-forwarded SSH reconnects
+    # fastest, but nothing makes VMware immune.
+    pause_before    = "45s"
     execute_command = "echo '${var.ssh_password}' | sudo -S bash -eux '{{.Path}}'"
     inline = [
       "oscap xccdf eval --profile ${var.cis_profile} --report /root/cis-report.html --results-arf /root/cis-arf.xml /usr/share/xml/scap/ssg/content/${var.ssg_ds} > /root/audit.txt 2>&1 || true",
