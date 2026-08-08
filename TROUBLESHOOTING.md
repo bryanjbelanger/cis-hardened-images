@@ -4,6 +4,64 @@ Hard-won findings, written down so they are not rediscovered the expensive way.
 
 ---
 
+## VMware: imported OVA will not power on (hardware version 99)
+
+**Not an image defect — an `ovftool` import bug. One line fixes it.**
+
+### Symptom
+
+An imported VM refuses to start. `vmware.log` contains:
+
+```
+[msg.upgrade.tooNewCurrentHWVersion] The virtual machine is using a hardware
+version that is too new ...
+[msg.moduletable.powerOnFailed] Module 'Upgrade' power on failed.
+```
+
+`vmrun start` reports only `Error: The operation was canceled`, which says
+nothing useful — the real message is in the VM's `vmware.log`.
+
+### Cause
+
+`ovftool` writes `virtualhw.version = "99"` into the `.vmx` it generates on
+import. 99 is not a real hardware version, and Fusion refuses it.
+
+The OVA is **not** at fault, which is worth stating because the obvious first
+assumption is that the export is wrong:
+
+```
+source VM  .vmx : virtualhw.version = "21"
+exported OVA/OVF: <VirtualSystemType>vmx-21</VirtualSystemType>
+grep -c '99' on the OVF: 0
+imported   .vmx : virtualhw.version = "99"   <- introduced here
+```
+
+Both the build VM and the OVF agree on 21. Only the import disagrees.
+
+### Fix
+
+```bash
+sed -i '' 's/^virtualhw.version = "99"/virtualhw.version = "21"/' <vm>.vmx
+```
+
+Verified: a VM that would not power on starts cleanly after this single edit.
+
+### What NOT to do
+
+Do not "fix" the export. Nothing in the pipeline produces 99, so changing the
+`ovftool` export flags or rebuilding the images changes nothing — the rebuilt
+OVA carries identical OVF metadata and imports to the same broken `.vmx`. That
+was the first conclusion reached here, and it was wrong.
+
+Worth re-testing if `--maxVirtualHardwareVersion` on export ever causes ovftool
+to map the version correctly on the way back in; until someone demonstrates
+that, the import-side edit is the fix.
+
+VirtualBox images never hit this: `virtualbox-iso` writes OVA natively and does
+not involve ovftool.
+
+---
+
 ## AlmaLinux 10 + STIG: audit rules do not load at boot
 
 **Status: unresolved. Alma 10 STIG is NOT publishable. Three hypotheses tested

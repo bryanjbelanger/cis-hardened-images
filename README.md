@@ -25,6 +25,35 @@ automated consumers can verify without the sidecar file.
 - **VMware Fusion / Workstation** — File → Import, select the `.ova`
 - **VirtualBox** — File → Import Appliance, select the `.ova`
 
+#### VMware: if the VM will not power on after import
+
+You may see this the first time you start an imported VM:
+
+```
+The virtual machine is using a hardware version that is too new ...
+Module 'Upgrade' power on failed.
+```
+
+**This is an `ovftool` import bug, not a problem with the image.** The OVA is
+correct — its OVF declares `vmx-21`, and the string `99` appears nowhere in it.
+On import, `ovftool` writes `virtualhw.version = "99"` into the generated `.vmx`,
+and Fusion then refuses to power on a hardware version it does not recognise.
+
+Fix it by editing one line in the imported `.vmx`:
+
+```bash
+sed -i '' 's/^virtualhw.version = "99"/virtualhw.version = "21"/' <vm>.vmx
+```
+
+(on Linux, `sed -i` without the `''`). Then start the VM normally. Verified:
+patching that single line takes a VM that refuses to boot to one that boots
+cleanly.
+
+21 is the hardware version the images are actually built at, so this restores
+what the OVA describes rather than downgrading anything. VirtualBox images are
+unaffected — `virtualbox-iso` exports OVA natively and never goes through
+`ovftool`.
+
 ### 3. Get a shell
 
 Root is locked and there is no guest agent on EL VirtualBox images, so **SSH is
