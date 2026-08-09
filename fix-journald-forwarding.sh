@@ -39,10 +39,24 @@ grep -rEl '^[[:space:]]*ForwardToSyslog' \
   /usr/lib/systemd/journald.conf.d/ /run/systemd/journald.conf.d/ 2>/dev/null \
   | sed 's/^/  | /'
 
-# Fix the main file for tidiness, then win on precedence with a drop-in in /etc,
-# which outranks both the main file and any vendor drop-in under /usr/lib.
+# Ubuntu's rsyslog ships /usr/lib/systemd/journald.conf.d/syslog.conf with
+# ForwardToSyslog=yes. A "99-" prefixed drop-in does NOT beat it: systemd sorts
+# drop-ins by FILENAME across every directory, and "syslog.conf" sorts after
+# "99-...". The numeric-prefix convention only orders files against each other.
+#
+# The mechanism that does work is shadowing — a file of the SAME NAME in /etc
+# always overrides the one in /usr/lib.
 sed -i 's/^[[:space:]]*ForwardToSyslog[[:space:]]*=.*/ForwardToSyslog=no/' "$CONF" 2>/dev/null
 install -d -m 0755 "$DROPIN_DIR"
+for vendor in /usr/lib/systemd/journald.conf.d/*.conf; do
+  [ -f "$vendor" ] || continue
+  grep -qE '^[[:space:]]*ForwardToSyslog[[:space:]]*=[[:space:]]*yes' "$vendor" || continue
+  shadow="$DROPIN_DIR/$(basename "$vendor")"
+  printf '[Journal]\nForwardToSyslog=no\n' > "$shadow"
+  chmod 0644 "$shadow"
+  log "shadowed $vendor with $shadow"
+done
+# Belt and braces for the plain case where no vendor drop-in exists.
 printf '[Journal]\nForwardToSyslog=no\n' > "$DROPIN"
 chmod 0644 "$DROPIN"
 log "wrote $DROPIN"
