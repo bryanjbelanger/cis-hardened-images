@@ -52,12 +52,12 @@ for vendor in /usr/lib/systemd/journald.conf.d/*.conf; do
   [ -f "$vendor" ] || continue
   grep -qE '^[[:space:]]*ForwardToSyslog[[:space:]]*=[[:space:]]*yes' "$vendor" || continue
   shadow="$DROPIN_DIR/$(basename "$vendor")"
-  printf '[Journal]\nForwardToSyslog=no\n' > "$shadow"
+  printf '[Journal]\nForwardToSyslog=no\nCompress=yes\nStorage=persistent\n' > "$shadow"
   chmod 0644 "$shadow"
   log "shadowed $vendor with $shadow"
 done
 # Belt and braces for the plain case where no vendor drop-in exists.
-printf '[Journal]\nForwardToSyslog=no\n' > "$DROPIN"
+printf '[Journal]\nForwardToSyslog=no\nCompress=yes\nStorage=persistent\n' > "$DROPIN"
 chmod 0644 "$DROPIN"
 log "wrote $DROPIN"
 
@@ -74,4 +74,13 @@ case "$after" in
   *=no) log "OK — journald no longer forwards to syslog" ;;
   *)    log "WARNING: still not disabled; something outranks $DROPIN" ;;
 esac
+
+# Compress and Storage ride in the same drop-in: journald.conf leaves both at
+# commented defaults, and CIS wants Compress=yes / Storage=persistent
+# (journald_compress, journald_storage). Same precedence problem, same fix.
+for k in Compress Storage; do
+  v=$(systemd-analyze cat-config systemd/journald.conf 2>/dev/null \
+      | grep -E "^[[:space:]]*${k}=" | tail -1)
+  log "effective ${k}: ${v:-<unset>}"
+done
 exit 0
