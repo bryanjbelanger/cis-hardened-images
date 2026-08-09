@@ -311,7 +311,10 @@ build {
       # because its content wrote the rules in a different order.
       "if [ -f /etc/audit/rules.d/immutable.rules ]; then mv -f /etc/audit/rules.d/immutable.rules /etc/audit/rules.d/zz-immutable.rules; fi",
       "for f in /etc/audit/rules.d/*.rules; do case \"$(basename \"$f\")\" in zz-*) ;; *) grep -q -- '-e 2' \"$f\" && mv -f \"$f\" \"/etc/audit/rules.d/zz-$(basename \"$f\")\" ;; esac; done",
-      "augenrules --load 2>&1 | tail -3 || true",
+      # Deliberately NOT `augenrules --load | tail -3` — that pipeline discarded
+      # the auditctl rejection message and cost four wrong hypotheses on
+      # AlmaLinux 10. dedup-audit-rules.sh loads the rules and keeps the output.
+      "true",
     ]
   }
 
@@ -331,6 +334,14 @@ build {
     expect_disconnect = true
   }
 
+  # De-duplicate audit rules before the audit. auditctl aborts the whole load on
+  # a duplicate rule ("Rule exists"), so a single repeat between two files in
+  # rules.d silently leaves most rules unloaded — 12 of 113 on AlmaLinux 10.
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
+    script          = "dedup-audit-rules.sh"
+  }
+
   # Final audit BEFORE sealing — sealing locks root, after which nothing can be
   # inspected. The summary is pulled back to the host as the build's evidence.
   provisioner "shell" {
@@ -347,7 +358,7 @@ build {
       "cp /root/cis-report.html /tmp/cis-report.html",
       # Guest state behind the rules that are still unexplained. Captured
       # here because sealing locks root and the VM is then destroyed.
-      "{ echo '## authselect'; authselect current 2>&1 | head -20; echo; echo '## pam.d/system-auth'; ls -l /etc/pam.d/system-auth; grep -n pam_unix /etc/pam.d/system-auth /etc/pam.d/password-auth 2>&1; echo; echo '## cron'; rpm -q cronie cron 2>&1; systemctl is-enabled crond 2>&1; echo; echo '## aide'; ls -l /var/lib/aide/ 2>&1; echo; echo '## rsyslog'; systemctl is-enabled rsyslog 2>&1; systemctl is-active rsyslog 2>&1; rpm -q rsyslog 2>&1 | head -1; echo; echo '## auditd'; auditctl -s 2>&1 | head -12; echo \"active_rules=$(auditctl -l 2>/dev/null | wc -l)\"; echo \"rulesd=$(ls /etc/audit/rules.d/ 2>/dev/null | tr '\\n' ' ')\"; echo \"immutable_in_files=$(grep -rl -- '-e 2' /etc/audit/rules.d/ 2>/dev/null | tr '\\n' ' ')\"; systemctl is-active auditd 2>&1; echo \"audit-rules_unit=$(systemctl is-enabled audit-rules 2>&1)\"; echo \"auditd_unit=$(systemctl is-enabled auditd 2>&1)\"; augenrules --check 2>&1 | head -3; } > /tmp/diagnostics.txt 2>&1 || true",
+      "{ echo '## authselect'; authselect current 2>&1 | head -20; echo; echo '## pam.d/system-auth'; ls -l /etc/pam.d/system-auth; grep -n pam_unix /etc/pam.d/system-auth /etc/pam.d/password-auth 2>&1; echo; echo '## cron'; rpm -q cronie cron 2>&1; systemctl is-enabled crond 2>&1; echo; echo '## aide'; ls -l /var/lib/aide/ 2>&1; echo; echo '## rsyslog'; systemctl is-enabled rsyslog 2>&1; systemctl is-active rsyslog 2>&1; rpm -q rsyslog 2>&1 | head -1; echo; echo '## auditd'; auditctl -s 2>&1 | head -12; echo \"active_rules=$(auditctl -l 2>/dev/null | wc -l)\"; echo \"rulesd=$(ls /etc/audit/rules.d/ 2>/dev/null | tr '\\n' ' ')\"; echo \"immutable_in_files=$(grep -rl -- '-e 2' /etc/audit/rules.d/ 2>/dev/null | tr '\\n' ' ')\"; systemctl is-active auditd 2>&1; echo \"audit-rules_unit=$(systemctl is-enabled audit-rules 2>&1)\"; echo \"auditd_unit=$(systemctl is-enabled auditd 2>&1)\"; augenrules --check 2>&1 | head -3; echo '## audit rule load attempt'; auditctl -R /etc/audit/audit.rules 2>&1 | head -25; echo \"post_load_rules=$(auditctl -l 2>/dev/null | wc -l)\"; } > /tmp/diagnostics.txt 2>&1 || true",
       "chmod a+r /tmp/audit-summary.txt /tmp/cis-report.html /tmp/diagnostics.txt",
     ]
   }
