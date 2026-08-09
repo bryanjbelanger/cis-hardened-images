@@ -4,66 +4,62 @@ Hard-won findings, written down so they are not rediscovered the expensive way.
 
 ---
 
-## Ubuntu CIS: 7 journald rules fail once the audit runs after a reboot
+## Ubuntu CIS: journald rules fail, and the published 360/2 was wrong
 
-**Unresolved, and it matters — it decides whether the published Ubuntu CIS
-numbers are honest. Nothing has been republished on the strength of either
-reading.**
+**Settled: the rebuilt 356/9 is honest and the published 360/2 was not.
+The underlying defect is still open — one attempted fix is in the wrong
+place in the sequence.**
 
-### What changed
+### What was proven
 
-Ubuntu 24.04 CIS, same source, same profile, only difference being the reboot
-added between remediation and the audit:
-
-```
-published (audit immediately after remediation) : 360 pass /  2 fail
-rebuilt   (audit after a reboot)                : 356 pass /  9 fail
-total evaluated: 408 in both — the rule set did not change
-```
-
-The seven that appear are all one family:
+A **published** Ubuntu CIS image was booted and inspected directly:
 
 ```
-service_rsyslog_enabled
-package_systemd-journal-remote_installed
-journald_compress
-journald_disable_forward_to_syslog
-journald_storage
-systemd_journal_upload_server_tls
-systemd_journal_upload_url
+/etc/systemd/journald.conf, mtime = build time, unchanged since:
+  line 20: ForwardToSyslog=yes     <- ACTIVE
+  line 38: #ForwardToSyslog=no     <- commented default
+/etc/systemd/journald.conf.d/     : does not exist
+systemd-journal-remote            : NOT installed
 ```
 
-Every other image in the same 16-build run reproduced its published numbers
-exactly, including both Alma 10 CIS images, so this is specific to Ubuntu's
-journald handling and not a general effect of the reboot.
+That image's recorded audit is 360 pass / 2 fail and claims
+`journald_disable_forward_to_syslog` passes. The shipped system plainly
+violates it.
 
-### The two readings, and why it matters
+**Why the audit was fooled:** oscap checks journald's RUNNING configuration.
+journald had not reloaded its file since remediation, so the audit measured a
+daemon whose in-memory state did not match the file it would load at the next
+boot. Auditing after a reboot reports the truth — which is why the rebuild says
+356/9.
 
-1. **The rebuilt number is honest.** Remediation configures journald and
-   installs `systemd-journal-remote`, the audit previously ran while that state
-   was still in memory, and a reboot loses it. If so the published 360/2 is
-   optimistic, users never actually get it, and the images should be
-   republished at 356/9 — a worse number that is true.
-2. **The rebuilt number is an artefact.** Something about auditing straight
-   after boot evaluates these rules differently, and 360/2 is what the image
-   really provides.
+So the reboot did not cause a regression; it exposed one. Any published image
+predating it may overstate its score for rules whose checks read running
+daemon state rather than files.
 
-These have opposite consequences, so guessing is worse than not answering.
+### Attempted fix that did NOT work — and why
 
-### How to settle it
+`site-policy.sh` now sets `ForwardToSyslog=no` and restarts journald. It runs and
+logs success, and the rule still fails:
 
-Boot a *published* Ubuntu CIS image, let it reach a steady state, and inspect
-directly:
-
-```bash
-grep -E 'Compress|Storage|ForwardToSyslog' /etc/systemd/journald.conf
-dpkg -l systemd-journal-remote
+```
+[site-policy] journald ForwardToSyslog=no (rsyslog is masked)
+ubuntu2404 CIS vmware — 356 pass / 9 fail   (unchanged)
 ```
 
-If the settings are absent on a booted published image, reading 1 is correct.
-The `sed`-the-vmx workaround in this document is needed to boot it, and guest
-operations will be refused because the `builder` password is expired by design —
-reach it over SSH instead.
+**site-policy runs BEFORE the second remediation pass.** Something in that pass
+— most plausibly an rsyslog package operation, since Ubuntu's rsyslog is what
+sets this value — puts `ForwardToSyslog=yes` back before the audit sees it.
+
+The fix is not wrong, it is mis-sequenced. It needs to run AFTER the final
+remediation and before the audit, alongside `dedup-audit-rules.sh`. Not yet
+tried.
+
+### Still unexplained
+
+`package_systemd-journal-remote_installed`, `systemd_journal_upload_url` and
+`systemd_journal_upload_server_tls` also fail. The package is genuinely not
+installed on the shipped image; CIS wants it. Whether remediation attempts the
+install and fails, or never attempts it, has not been checked.
 
 ---
 
