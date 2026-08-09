@@ -71,6 +71,23 @@ log "cron.allow present, root:root 0640"
 for unit in rsyslog.service systemd-journal-remote.socket bluetooth.service; do
   systemctl mask "$unit" >/dev/null 2>&1
 done
+
+# journald must not forward to a syslog daemon we have just masked. Ubuntu ships
+# journald.conf with ForwardToSyslog=yes ACTIVE (line 20, above the commented
+# default at line 38) and nothing in remediation turns it off.
+#
+# This went unnoticed because oscap checks journald's RUNNING configuration, and
+# journald had not reloaded the file since remediation — so the audit passed
+# journald_disable_forward_to_syslog while the shipped image violated it.
+# Confirmed by booting a PUBLISHED image: the file has said `yes` since build
+# time, and its recorded audit claims the rule passes. Auditing after a reboot
+# exposes the truth.
+if [ -f /etc/systemd/journald.conf ]; then
+  sed -i 's/^[[:space:]]*ForwardToSyslog[[:space:]]*=.*/ForwardToSyslog=no/' /etc/systemd/journald.conf
+  grep -q '^ForwardToSyslog=no' /etc/systemd/journald.conf || printf 'ForwardToSyslog=no\n' >> /etc/systemd/journald.conf
+  systemctl restart systemd-journald >/dev/null 2>&1
+  log "journald ForwardToSyslog=no (rsyslog is masked)"
+fi
 if command -v ufw >/dev/null 2>&1; then
   systemctl mask nftables.service >/dev/null 2>&1
   log "masked rsyslog, journal-remote, bluetooth, nftables"
