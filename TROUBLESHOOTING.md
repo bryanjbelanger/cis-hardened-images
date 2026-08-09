@@ -62,54 +62,71 @@ not involve ovftool.
 
 ---
 
-## AlmaLinux 10 + STIG: audit rules do not load at boot
+## AlmaLinux 10 + STIG: only 12 of ~113 audit rules load
 
-**Status: unresolved. Alma 10 STIG is NOT publishable. Three hypotheses tested
-and eliminated — read this before forming a fourth.**
+**Partly solved. The load is fixed; the audit score is not. Alma 10 STIG is still
+NOT publishable at 370 pass / 100 fail.**
 
-### Symptom
+### Root cause of the load failure — found, and fixed
 
-AlmaLinux 10 STIG scores **370 pass / 100 fail**, of which **79 are
-`audit_rules_*`**. Rocky 10 STIG, same EL10 base and the same profile, scores
-457/14 with **zero** audit_rules failures. Alma 10 **CIS** is unaffected (302/6).
-
-### What is established
-
-From the build's own diagnostics, not inference:
+`auditctl` **aborts the entire load** when a rule is already present:
 
 ```
-rulesd       = 13 rule files present, written correctly by remediation
-augenrules --check = "No change"      # rules.d compiles to audit.rules fine
-active_rules = 12                     # kernel has only 12
-enabled      = 1                      # -e 2 never applied
+Error sending add rule data request (Rule exists)
+There was an error in line 17 of /etc/audit/audit.rules
+No rules
 ```
 
-The rules are correct on disk and absent from the running kernel config. The
-audit checks the running config, so they fail. `augenrules --load` run by hand
-during the build **succeeds** and reports normal status — and after the next
-reboot the kernel is back to 12 rules. So loading works on demand and fails at
-boot.
+It does not warn and skip. Alma's SSG content emits the same rule into more than
+one file under `rules.d`, so twelve rules loaded, line 17 repeated one of them,
+and roughly a hundred never reached the kernel. Rocky 10 scores 457/14 from the
+identical profile only because its content happens not to emit a duplicate.
 
-### Eliminated — do not retry these
+`dedup-audit-rules.sh` removes repeated rules across `rules.d` — in `rules.d`,
+not in the compiled `audit.rules`, which `augenrules` regenerates from it at
+every boot. Measured effect on AlmaLinux 10:
 
-| Hypothesis | Verdict | Evidence |
-|---|---|---|
-| Rules never reloaded after remediation | **Wrong** | Added a reboot between remediation and audit. No change: still 370/100. |
-| `-e 2` loading mid-sequence and locking the rest | **Wrong** | `augenrules` concatenates lexically and `immutable.rules` did sort 7th of 13, which looked decisive. Renamed it to `zz-immutable.rules` (confirmed last in the listing) and ran `augenrules --load`. Still 370/100, still 12 active. |
-| The load itself erroring partway | **Wrong** | `augenrules --load` output shows normal audit status, no rule rejected. |
+```
+rule lines      386 -> 86   (300 duplicates removed)
+active rules     12 -> 81
+auditd enabled    1 -> 2    (the -e 2 immutable flag now applies)
+```
 
-### Next step
+It is **conditional**: it only rewrites `rules.d` when a load is actually
+aborting on a duplicate, and leaves a healthy system untouched. Rocky 10 loads
+all 113 of its rules with duplicates present, and relocating rules between files
+can break checks that look for a rule in a specific file — so a working target
+must not be "fixed".
 
-The evidence points at **boot-time** loading specifically. The next diagnostic —
-already added — reports `systemctl is-enabled audit-rules` and `auditd`. If
-`audit-rules.service` is disabled or masked on Alma 10, nothing loads rules.d at
-boot and everything above follows. Check that before anything else.
+### What is still wrong
 
-Note the reboot added while chasing this is worth keeping regardless: auditing
-the system as it will actually boot is right on its own merits, and it is what
-made the boot-versus-on-demand distinction visible at all.
+Despite 81 rules active and the immutable flag applied, the audit is **unchanged
+at 370/100 with the same 79 `audit_rules_*` failures**. Rocky 10 has 113 active
+and zero such failures. So the remaining gap is not the load abort:
 
----
+* Alma reaches 81 active rules against Rocky's 113 — roughly 32 short.
+* Failures include rules that ought to be satisfiable, such as
+  `audit_rules_immutable` (which wants `-e 2`, and `auditctl -s` now reports
+  `enabled 2`).
+
+Two candidates, neither tested:
+
+1. Alma's remediation emits fewer distinct rules than its own profile checks for
+   — an upstream content mismatch.
+2. The checks inspect specific FILES rather than the running configuration, and
+   deduplication moved a rule into a different file from the one being checked.
+
+Distinguishing them needs the full `auditctl -l` output and the per-rule OVAL
+detail from the report, neither of which is captured yet.
+
+### Diagnostic lesson worth keeping
+
+This took four wrong hypotheses because the load ran as
+`augenrules --load 2>&1 | tail -3`. The rejection prints BEFORE the trailing
+status block, so the one line naming the fault was discarded every time, while
+every other signal looked healthy — rules present on disk, `augenrules --check`
+reporting "No change". **Replay the load and keep all of its output** before
+theorising about anything else.
 
 ## VirtualBox on EL: Guest Additions will not compile
 

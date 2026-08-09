@@ -29,6 +29,24 @@ log() { echo "[dedup-audit] $*"; }
 
 [ -d /etc/audit/rules.d ] || { log "no rules.d — nothing to do"; exit 0; }
 
+# ONLY act when the load is actually broken. Rocky 10 loads all 113 of its rules
+# with duplicates present and scores 457/14; rewriting its rules.d would change a
+# working system for no benefit, and rules relocating between files can break
+# checks that look for a rule in a SPECIFIC file. So: try a load first, and leave
+# a healthy system completely alone.
+active_now=$(auditctl -l 2>/dev/null | wc -l | tr -d ' ')
+if [ "$active_now" -ge 50 ]; then
+  log "$active_now rules already active — healthy, leaving rules.d untouched"
+  exit 0
+fi
+log "only $active_now rules active — checking for a duplicate abort"
+if ! auditctl -R /etc/audit/audit.rules 2>&1 | grep -q 'Rule exists'; then
+  log "no duplicate-rule abort detected — leaving rules.d untouched"
+  exit 0
+fi
+log "duplicate rule aborts the load; de-duplicating"
+
+
 before=$(cat /etc/audit/rules.d/*.rules 2>/dev/null | grep -cvE '^[[:space:]]*(#|$)')
 
 # Walk the files in the SAME lexical order augenrules concatenates them, keeping
