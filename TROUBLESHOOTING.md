@@ -4,6 +4,69 @@ Hard-won findings, written down so they are not rediscovered the expensive way.
 
 ---
 
+## Ubuntu CIS: 7 journald rules fail once the audit runs after a reboot
+
+**Unresolved, and it matters — it decides whether the published Ubuntu CIS
+numbers are honest. Nothing has been republished on the strength of either
+reading.**
+
+### What changed
+
+Ubuntu 24.04 CIS, same source, same profile, only difference being the reboot
+added between remediation and the audit:
+
+```
+published (audit immediately after remediation) : 360 pass /  2 fail
+rebuilt   (audit after a reboot)                : 356 pass /  9 fail
+total evaluated: 408 in both — the rule set did not change
+```
+
+The seven that appear are all one family:
+
+```
+service_rsyslog_enabled
+package_systemd-journal-remote_installed
+journald_compress
+journald_disable_forward_to_syslog
+journald_storage
+systemd_journal_upload_server_tls
+systemd_journal_upload_url
+```
+
+Every other image in the same 16-build run reproduced its published numbers
+exactly, including both Alma 10 CIS images, so this is specific to Ubuntu's
+journald handling and not a general effect of the reboot.
+
+### The two readings, and why it matters
+
+1. **The rebuilt number is honest.** Remediation configures journald and
+   installs `systemd-journal-remote`, the audit previously ran while that state
+   was still in memory, and a reboot loses it. If so the published 360/2 is
+   optimistic, users never actually get it, and the images should be
+   republished at 356/9 — a worse number that is true.
+2. **The rebuilt number is an artefact.** Something about auditing straight
+   after boot evaluates these rules differently, and 360/2 is what the image
+   really provides.
+
+These have opposite consequences, so guessing is worse than not answering.
+
+### How to settle it
+
+Boot a *published* Ubuntu CIS image, let it reach a steady state, and inspect
+directly:
+
+```bash
+grep -E 'Compress|Storage|ForwardToSyslog' /etc/systemd/journald.conf
+dpkg -l systemd-journal-remote
+```
+
+If the settings are absent on a booted published image, reading 1 is correct.
+The `sed`-the-vmx workaround in this document is needed to boot it, and guest
+operations will be refused because the `builder` password is expired by design —
+reach it over SSH instead.
+
+---
+
 ## VMware: imported OVA will not power on (hardware version 99)
 
 **Not an image defect — an `ovftool` import bug. One line fixes it.**
