@@ -22,31 +22,42 @@ set -uo pipefail
 log() { echo "[journald-fix] $*"; }
 
 CONF=/etc/systemd/journald.conf
-[ -f "$CONF" ] || { log "no $CONF — nothing to do"; exit 0; }
+DROPIN_DIR=/etc/systemd/journald.conf.d
+DROPIN="$DROPIN_DIR/99-cis-forward-to-syslog.conf"
 
-before=$(grep -E '^[[:space:]]*ForwardToSyslog' "$CONF" 2>/dev/null | head -1)
-log "before: ${before:-<unset, using compiled default>}"
+before=$(systemd-analyze cat-config systemd/journald.conf 2>/dev/null \
+         | grep -E '^[[:space:]]*ForwardToSyslog' | tail -1)
+log "effective before: ${before:-<unset>}"
 
-# Replace any active setting, and add one if the file only carries the commented
-# default.
-sed -i 's/^[[:space:]]*ForwardToSyslog[[:space:]]*=.*/ForwardToSyslog=no/' "$CONF"
-grep -q '^ForwardToSyslog=no' "$CONF" || printf 'ForwardToSyslog=no\n' >> "$CONF"
+# Show WHERE it is being set. Editing journald.conf was not enough because
+# systemd gives *.conf.d drop-ins precedence over the main file — the earlier
+# version of this script set the file correctly and the effective value stayed
+# `yes`.
+log "sources setting it:"
+grep -rEl '^[[:space:]]*ForwardToSyslog' \
+  /etc/systemd/journald.conf /etc/systemd/journald.conf.d/ \
+  /usr/lib/systemd/journald.conf.d/ /run/systemd/journald.conf.d/ 2>/dev/null \
+  | sed 's/^/  | /'
 
-# journald must reload, or the running config keeps the old value and the audit
-# reads THAT — the exact trap this whole issue turned on.
+# Fix the main file for tidiness, then win on precedence with a drop-in in /etc,
+# which outranks both the main file and any vendor drop-in under /usr/lib.
+sed -i 's/^[[:space:]]*ForwardToSyslog[[:space:]]*=.*/ForwardToSyslog=no/' "$CONF" 2>/dev/null
+install -d -m 0755 "$DROPIN_DIR"
+printf '[Journal]\nForwardToSyslog=no\n' > "$DROPIN"
+chmod 0644 "$DROPIN"
+log "wrote $DROPIN"
+
 systemctl restart systemd-journald >/dev/null 2>&1 || log "WARNING: journald restart failed"
 sleep 2
 
-after=$(grep -E '^[[:space:]]*ForwardToSyslog' "$CONF" | head -1)
-log "after:  ${after:-<missing>}"
-
-# Verify against the RUNNING daemon, not the file — checking the file would
-# repeat the mistake that hid this.
-running=$(systemctl show systemd-journald -p ForwardToSyslog --value 2>/dev/null)
-if [ -n "$running" ]; then
-  log "running daemon reports ForwardToSyslog=$running"
-else
-  eff=$(systemd-analyze cat-config systemd/journald.conf 2>/dev/null | grep -E '^[[:space:]]*ForwardToSyslog' | tail -1)
-  log "effective config: ${eff:-unavailable}"
-fi
+# Verify the EFFECTIVE value, not the file. Checking the file is what let a
+# published image ship ForwardToSyslog=yes while its audit claimed the rule
+# passed.
+after=$(systemd-analyze cat-config systemd/journald.conf 2>/dev/null \
+        | grep -E '^[[:space:]]*ForwardToSyslog' | tail -1)
+log "effective after:  ${after:-<unset>}"
+case "$after" in
+  *=no) log "OK — journald no longer forwards to syslog" ;;
+  *)    log "WARNING: still not disabled; something outranks $DROPIN" ;;
+esac
 exit 0
