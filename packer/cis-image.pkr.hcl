@@ -342,6 +342,13 @@ build {
     script          = "dedup-audit-rules.sh"
   }
 
+  # journald syslog forwarding off — AFTER the final remediation, which puts it
+  # back if this runs earlier (it was in site-policy.sh and did nothing).
+  provisioner "shell" {
+    execute_command = "echo '${var.ssh_password}' | sudo -S bash '{{.Path}}'"
+    script          = "fix-journald-forwarding.sh"
+  }
+
   # Final audit BEFORE sealing — sealing locks root, after which nothing can be
   # inspected. The summary is pulled back to the host as the build's evidence.
   provisioner "shell" {
