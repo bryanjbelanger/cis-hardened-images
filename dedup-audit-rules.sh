@@ -39,12 +39,18 @@ if [ "$active_now" -ge 50 ]; then
   log "$active_now rules already active — healthy, leaving rules.d untouched"
   exit 0
 fi
-log "only $active_now rules active — checking for a duplicate abort"
-if ! auditctl -R /etc/audit/audit.rules 2>&1 | grep -q 'Rule exists'; then
-  log "no duplicate-rule abort detected — leaving rules.d untouched"
-  exit 0
-fi
-log "duplicate rule aborts the load; de-duplicating"
+log "only $active_now rules active — replaying the load to see why"
+
+# KEEP the output. Grepping it away and acting on the exit of a pipeline is what
+# hid this bug for four attempts, and then made this very gate misfire: it saw a
+# broken system, decided there was no duplicate, and left it broken.
+replay=$(auditctl -R /etc/audit/audit.rules 2>&1 | head -10)
+echo "$replay" | sed 's/^/  | /'
+
+# Act on the rule COUNT, which is the thing that actually matters. Whatever the
+# replay says, a system with this few rules loaded needs the duplicates removed;
+# a healthy one returned earlier and never reaches here.
+log "de-duplicating (only $active_now rules loaded)"
 
 
 before=$(cat /etc/audit/rules.d/*.rules 2>/dev/null | grep -cvE '^[[:space:]]*(#|$)')
