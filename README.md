@@ -9,6 +9,38 @@ you can see exactly which rules pass, which fail, and why.
 
 ---
 
+## Why this exists
+
+Every organization that has to meet CIS or STIG builds the same image over and
+over, by hand. The work is slow, easy to get subtly wrong, and almost never
+reproducible — the person who built last quarter's golden image is often the
+only one who knows what went into it, and the audit evidence, if it exists at
+all, lives in a spreadsheet somewhere.
+
+I have hit this from the inside. Across enterprise engagements I automated
+secure operating system delivery and watched the same pattern repeat: hardening
+gets treated as a checklist performed against a machine that is already running,
+rather than as a property of a build that can be reproduced on demand. Golden
+images accumulate, nobody can say precisely which rules a given VM satisfies,
+and drift starts the day the image ships.
+
+This project takes the other approach. One parameterized kickstart, one
+hardening mechanism, nine targets, and an unattended build that produces a
+machine plus the audit report that proves what it is. If you do not like the
+result, you change the template and rebuild — you never patch a running box back
+into compliance.
+
+Two things follow from that, and they are the point of the whole repo:
+
+- **Every image ships with its own OpenSCAP report.** You do not take my word
+  for the score; you read which rules passed, which failed, and why.
+- **The bar is zero *unexplained* failures, not a high score.** Rocky 9 audits
+  274 pass / 2 fail, and both failures are the documented bootloader-password
+  exceptions that only the operator can satisfy. A number without an explanation
+  is not evidence.
+
+---
+
 ## Using an image
 
 ### 1. Verify what you downloaded
@@ -204,9 +236,61 @@ Three rules, and they exist for a reason:
 
 ## Upstream contributions
 
-A bug found here was fixed and sent upstream —
+One finding was sent upstream and later retracted —
 [packer-plugin-virtualbox#192](https://github.com/hashicorp/packer-plugin-virtualbox/pull/192)
-(EFI guests cannot boot ISOs on high SATA ports). See [UPSTREAM.md](UPSTREAM.md).
+(EFI guests cannot boot ISOs on high SATA ports). The premise was wrong: the
+failures were caused by 4 MB VRAM wedging Anaconda's graphical installer, not by
+the SATA port. See [UPSTREAM.md](UPSTREAM.md).
+
+## Notable problems solved
+
+The interesting work in this project was rarely the hardening itself — it was
+the failures around it. These are documented in full in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md); the short versions:
+
+**The Anaconda OSCAP addon is not a viable hardening mechanism on modern EL.**
+It was removed upstream in EL10, and it is unusable on EL9 *minimal* media — the
+addon needs SCAP Security Guide content present in the installer runtime, and
+only the full DVD carries it, so a minimal-ISO build fails with "SCAP Security
+Guide not found on the system." Hardening moved into `%post` via `oscap xccdf
+eval --remediate`, which is now the single mechanism across every EL target. One
+mechanism for all majors turned out to be more maintainable than special-casing
+each.
+
+**VirtualBox Guest Additions fail to build on EL 9.8 because of an off-by-one in
+a version guard.** GA 7.2.14 gates the modern `kernel_file_open` call behind
+`RTLNX_RHEL_RANGE(9,9, 9,99)`, so a 9.8 build falls through to a branch calling
+`open_with_fake_path` — a function the kernel no longer exports. The subtlety is
+*why* a version comparison is the wrong tool: Red Hat backports API changes into
+z-stream kernels **within** a point release, and `5.14.0-687.33.1.el9_8` already
+carries the change Oracle expected only in 9.9. Nothing on the consuming side
+fixes this — no package is missing, and forcing past `-Werror` merely relocates
+the failure to module load on an undefined symbol. Oracle does not see it
+because Oracle Linux defaults to UEK, which takes an entirely different branch.
+Documented with a precise retest condition rather than worked around.
+
+**A finding published upstream, and then retracted.** I opened
+[packer-plugin-virtualbox#192](https://github.com/hashicorp/packer-plugin-virtualbox/pull/192)
+attributing EFI boot failures to the builder hardcoding the boot ISO to SATA
+port 13. The reproduction table looked convincing. It was wrong: the real cause
+was VMs provisioned with 4 MB of VRAM, which wedges Anaconda's graphical
+installer. With adequate VRAM, EFI boots from port 13 — the exact configuration
+I had called unbootable. The corrected behavior is verified, the finding is
+marked retracted in [UPSTREAM.md](UPSTREAM.md), and the PR is to be withdrawn.
+Publishing a wrong result and correcting it in public is part of the work;
+leaving it standing would not be.
+
+**Minimal ISO media is a subset, and it bites at the worst moment.**
+Minimal-ISO targets must also pull the network BaseOS repo — the media's BaseOS
+is incomplete, and on EL10 `open-vm-tools` (the control channel for the build)
+needs `fuse3` and `dbus-tools`, which the media lacks. An unattended build has
+nobody to answer Anaconda's "missing packages … ignore?" prompt, so a missing
+dependency is not a warning, it is a hang.
+
+**Ubuntu and Debian are not "EL with different package names."** They differ in
+the datastream, the profile identifier (`cis_level1_server` rather than
+`cis_server_l1`), and the install flow — enough that this repo documents them as
+separate paths rather than pretending one abstraction covers all nine targets.
 
 ## Honest limitations
 
